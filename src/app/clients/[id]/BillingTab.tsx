@@ -1,7 +1,8 @@
 import { Empty, Totals, fmtDate, money, statusPill, totals } from "@/components/Shell";
+import DeleteButton from "@/components/DeleteButton";
 import CurrencySelect from "@/components/CurrencySelect";
 import {
-  addInvoiceAction, chargeLateInterestAction, createOneTimePlanAction, createRecurringPlanAction, invoiceInstallmentAction,
+  addInvoiceAction, deleteInvoiceAction, chargeLateInterestAction, createOneTimePlanAction, createRecurringPlanAction, invoiceInstallmentAction,
   invoiceRecurringNowAction, markInvoicePaidAction, savePaymentTermsAction, sendDraftInvoiceAction, setPlanStatusAction,
 } from "@/app/actions";
 import { supabaseServer } from "@/lib/supabase-server";
@@ -208,6 +209,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
                   <span className="font-semibold">{money(i.amount, i.currency)}</span>
                   <span className={`pill ${statusPill(late ? "overdue" : i.status)}`}>{late ? "overdue" : i.status}</span>
                   <a href={`/invoices/${i.id}`} className="text-xs font-medium text-forest hover:underline">Invoice</a>
+                  <form action={deleteInvoiceAction}><input type="hidden" name="id" value={i.id} /><DeleteButton message="Delete this invoice permanently? If it came from a payment plan, that payment becomes un-invoiced and may be invoiced again. To keep a record without billing, mark it paid instead." /></form>
                   {i.status === "draft" && <form action={sendDraftInvoiceAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-forest hover:underline">Send to client</button></form>}
                   {unpaid && <form action={markInvoicePaidAction}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></form>}
                   {late && unbilled >= 0.01 && (

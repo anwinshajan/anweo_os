@@ -82,7 +82,7 @@ Push to GitHub and import into Vercel. Add the variables above under Settings â†
 - Approving a post cannot be done by anyone below manager, even by calling the API directly.
 - Files are in a private bucket. The server checks the database permission first, then hands out a 60-second link.
 - Anweo AI reads data with the signed-in person's own access, so it can never see more than they can. It is rate limited to 30 questions an hour per person and cannot change anything.
-- 168 database checks, 11 currency, 29 payment-maths and 8 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
+- 170 database checks, 11 currency, 29 payment-maths and 8 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
 
 ## Branding
 Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141413`, paper `#F4F3EF`).

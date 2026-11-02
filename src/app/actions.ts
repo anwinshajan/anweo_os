@@ -839,3 +839,33 @@ export async function saveCompanySettingsAction(form: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath("/settings");
 }
+
+/* ---------------------------------------------------- deleting transactions (admin only) */
+export async function deleteInvoiceAction(form: FormData) {
+  const me = await requireAdmin();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const { data: inv, error } = await sb.from("invoices").delete().eq("id", id).select("period_label,client_id,amount,currency,status").single();
+  if (error || !inv) throw new Error(error?.message ?? "Could not delete that invoice");
+  await logEvent(sb, me.id, inv.client_id, "invoice_deleted", `Deleted invoice: ${inv.period_label} (${inv.amount} ${inv.currency}, ${inv.status})`, false);
+  revalidatePath(`/clients/${inv.client_id}`);
+  revalidatePath("/finance");
+  revalidatePath("/");
+}
+
+export async function deleteExpenseAction(form: FormData) {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("expenses").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/finance");
+}
+
+export async function deletePayRecordAction(form: FormData) {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("pay_records").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/finance");
+  revalidatePath("/pay");
+}

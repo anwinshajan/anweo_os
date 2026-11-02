@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import Shell, { Empty, PageHead, Totals, fmtDate, money, showTotals, statusPill, totals } from "@/components/Shell";
 import CurrencySelect from "@/components/CurrencySelect";
-import { addExpenseAction, addPayRecordAction, chargeLateInterestAction, markInvoicePaidAction, markPayPaidAction, runBillingAction } from "@/app/actions";
+import DeleteButton from "@/components/DeleteButton";
+import { deleteExpenseAction, deleteInvoiceAction, deletePayRecordAction, addExpenseAction, addPayRecordAction, chargeLateInterestAction, markInvoicePaidAction, markPayPaidAction, runBillingAction } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { isAdminRole, roleLabel } from "@/lib/roles";
 import { addDays, effectiveDueDate, intervalLabel, isOverdue, isoDay, lateInterest } from "@/lib/payments";
@@ -110,6 +111,7 @@ export default async function Finance() {
                 <span className="font-semibold">{money(i.amount, i.currency)}</span>
                 <span className={`pill ${statusPill(i.late ? "overdue" : i.status)}`}>{i.late ? "overdue" : i.status}</span>
                 <form action={markInvoicePaidAction}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="client_id" value={i.client_id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></form>
+                <form action={deleteInvoiceAction}><input type="hidden" name="id" value={i.id} /><DeleteButton message="Delete this invoice permanently? If it came from a payment plan, that payment becomes un-invoiced and may be invoiced again. To keep a record without billing, mark it paid instead." /></form>
                 {i.late && i.unbilled >= 0.01 && <form action={chargeLateInterestAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-amber-800 hover:underline">Charge {money(i.unbilled, i.currency)} interest</button></form>}
               </span>
             </div>
@@ -143,6 +145,7 @@ export default async function Finance() {
                 <span className="font-semibold">{money(p.amount, p.currency)}</span>
                 <span className={`pill ${statusPill(p.status)}`}>{p.status}</span>
                 {p.status === "pending" && <form action={markPayPaidAction}><input type="hidden" name="id" value={p.id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></form>}
+                <form action={deletePayRecordAction}><input type="hidden" name="id" value={p.id} /><DeleteButton message="Delete this pay record permanently?" /></form>
               </span>
             </div>
           ))}
@@ -165,7 +168,7 @@ export default async function Finance() {
         <div className="space-y-2">
           {(expenses ?? []).length === 0 && <Empty>No expenses recorded yet.</Empty>}
           {(expenses ?? []).slice(0, 30).map((e) => (
-            <div key={e.id} className="row"><div className="min-w-0"><p className="truncate font-medium">{e.title}</p><p className="font-mono text-[11px] uppercase text-mute">{e.category} · {fmtDate(e.incurred_on)}</p></div><span className="font-semibold">{money(e.amount, e.currency)}</span></div>
+            <div key={e.id} className="row"><div className="min-w-0"><p className="truncate font-medium">{e.title}</p><p className="font-mono text-[11px] uppercase text-mute">{e.category} · {fmtDate(e.incurred_on)}</p></div><span className="flex items-center gap-3"><span className="font-semibold">{money(e.amount, e.currency)}</span><form action={deleteExpenseAction}><input type="hidden" name="id" value={e.id} /><DeleteButton message="Delete this expense permanently?" /></form></span></div>
           ))}
         </div>
       </section>

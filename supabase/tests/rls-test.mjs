@@ -160,6 +160,8 @@ await as(mgr, async () => {
   ok("manager can NOT see invoices (finance is admin-only)", (await q(`select id from invoices`)).rows.length === 0);
   let mi = false; try { await q(`insert into invoices(client_id,period_label,amount) values ('${clA}','x',1)`); } catch { mi = true; }
   ok("manager cannot create invoices", mi);
+  const md = await q(`delete from invoices where client_id='${clA}'`);
+  ok("manager cannot delete invoices", (md.affectedRows ?? md.rowCount ?? 0) === 0);
   await q(`insert into clients(business_name) values ('M client')`);
   ok("manager can create clients", true);
   await q(`insert into packages(service_id,name,price_monthly) values ('${svc}','Pro',500)`);
@@ -178,6 +180,9 @@ await as(admin, async () => {
   ok("admin can change access flags", true);
   ok("admin sees all profiles", (await q(`select id from profiles`)).rows.length >= 8);
   ok("admin sees all invoices incl. drafts", (await q(`select id from invoices`)).rows.length === 3);
+  await q(`insert into invoices(client_id,period_label,amount) values ('${clB}','Del',5)`);
+  const ad = await q(`delete from invoices where period_label='Del'`);
+  ok("admin can delete an invoice", (ad.affectedRows ?? ad.rowCount) === 1 && (await q(`select id from invoices`)).rows.length === 3);
 });
 
 
