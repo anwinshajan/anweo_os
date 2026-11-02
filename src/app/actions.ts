@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getMe, supabaseAdmin, supabaseServer } from "@/lib/supabase-server";
 import { STAFF_ROLES, isAdminRole, isLeadRole, type Role } from "@/lib/roles";
+import { BASE_CURRENCY, CURRENCIES, currencyForCountry, isCurrency, ratesFromGbpBase } from "@/lib/currency";
 
 /* ------------------------------------------------------------------ guards */
 async function requireActive() {
@@ -31,6 +32,8 @@ const canSocial = (me: { role: Role; can_manage_social: boolean }) =>
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const num = (f: FormData, k: string) => Number(str(f, k));
+// A valid currency code from a form, or the fallback.
+const cur = (f: FormData, k: string, fallback: string = BASE_CURRENCY) => (isCurrency(str(f, k)) ? str(f, k) : fallback);
 
 type Sb = Awaited<ReturnType<typeof supabaseServer>>;
 // Activity history. `visible` rows appear in the client's timeline; the rest stay internal.
@@ -44,6 +47,7 @@ export async function createClientAction(form: FormData) {
   const sb = await supabaseServer();
   const business_name = str(form, "business_name");
   if (!business_name) throw new Error("Please enter the business name");
+  const country = str(form, "country") || "India";
   const { data, error } = await sb
     .from("clients")
     .insert({
@@ -51,7 +55,8 @@ export async function createClientAction(form: FormData) {
       contact_name: str(form, "contact_name") || null,
       email: str(form, "email") || null,
       phone: str(form, "phone") || null,
-      country: str(form, "country") || "India",
+      country,
+      currency: cur(form, "currency", currencyForCountry(country)),
       notes: str(form, "notes") || null,
       created_by: me.id,
     })
@@ -77,6 +82,7 @@ export async function updateClientAction(form: FormData) {
       email: str(form, "email") || null,
       phone: str(form, "phone") || null,
       country: str(form, "country") || "India",
+      currency: cur(form, "currency", currencyForCountry(str(form, "country") || "India")),
       notes: str(form, "notes") || null,
     })
     .eq("id", id);
@@ -104,16 +110,21 @@ export async function assignServiceAction(form: FormData) {
   const [service_id, pkgPart] = str(form, "choice").split(":");
   const package_id = pkgPart || null;
   const typed = str(form, "price_monthly");
-  let currency = str(form, "currency") || "GBP";
   if (!client_id || !service_id) return;
+
+  const { data: client } = await sb.from("clients").select("currency").eq("id", client_id).single();
+  if (!client) throw new Error("Client not found");
+  let currency = cur(form, "currency", client.currency);
 
   let price = typed === "" ? NaN : Number(typed);
   if (package_id) {
-    const { data: pkg } = await sb.from("packages").select("service_id,price_monthly,currency").eq("id", package_id).single();
+    const { data: pkg } = await sb.from("packages").select("service_id,price_monthly,currency,prices").eq("id", package_id).single();
     if (!pkg || pkg.service_id !== service_id) throw new Error("That package belongs to a different service");
     if (Number.isNaN(price)) {
-      price = Number(pkg.price_monthly);
-      currency = pkg.currency;
+      // Prefer the package's price in the client's own currency; otherwise fall back to its base price.
+      const own = (pkg.prices as Record<string, number> | null)?.[client.currency];
+      if (own !== undefined && own > 0) { price = Number(own); currency = client.currency; }
+      else { price = Number(pkg.price_monthly); currency = pkg.currency; }
     }
   }
   if (!(price >= 0)) throw new Error("Enter a monthly price or pick a package");
@@ -154,6 +165,17 @@ export async function toggleServiceAction(form: FormData) {
   await sb.from("services").update({ active: str(form, "active") === "true" }).eq("id", str(form, "id"));
   revalidatePath("/catalogue");
 }
+// Extra prices typed as price_INR, price_USD ... (blank = none). The base currency has its own field.
+function extraPrices(form: FormData, baseCurrency: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const c of CURRENCIES) {
+    if (c.code === baseCurrency) continue;
+    const v = Number(str(form, `price_${c.code}`));
+    if (str(form, `price_${c.code}`) !== "" && v > 0) out[c.code] = v;
+  }
+  return out;
+}
+
 export async function createPackageAction(form: FormData) {
   await requireLead();
   const sb = await supabaseServer();
@@ -161,11 +183,30 @@ export async function createPackageAction(form: FormData) {
   const name = str(form, "name");
   const price = num(form, "price_monthly");
   if (!service_id || !name || !(price >= 0)) return;
+  const currency = cur(form, "currency");
   const features = str(form, "features").split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 20);
   const { error } = await sb.from("packages").insert({
-    service_id, name, price_monthly: price, currency: str(form, "currency") || "GBP",
+    service_id, name, price_monthly: price, currency,
+    prices: extraPrices(form, currency),
     description: str(form, "description") || null, features,
   });
+  if (error) throw new Error(error.message);
+  revalidatePath("/catalogue");
+}
+
+export async function updatePackageAction(form: FormData) {
+  await requireLead();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const name = str(form, "name");
+  const price = num(form, "price_monthly");
+  if (!id || !name || !(price >= 0)) throw new Error("Give the package a name and a price");
+  const currency = cur(form, "currency");
+  const features = str(form, "features").split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 20);
+  const { error } = await sb.from("packages").update({
+    name, price_monthly: price, currency, prices: extraPrices(form, currency),
+    description: str(form, "description") || null, features,
+  }).eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/catalogue");
 }
@@ -444,8 +485,9 @@ export async function addInvoiceAction(form: FormData) {
   if (!client_id || !(amount > 0)) throw new Error("Enter an amount above zero");
   const period = str(form, "period_label") || new Date().toLocaleString("en-GB", { month: "long", year: "numeric" });
   const draft = form.get("draft") === "on";
+  const { data: client } = await sb.from("clients").select("currency").eq("id", client_id).single();
   const { error } = await sb.from("invoices").insert({
-    client_id, period_label: period, amount, currency: str(form, "currency") || "GBP", status: draft ? "draft" : "due",
+    client_id, period_label: period, amount, currency: cur(form, "currency", client?.currency ?? BASE_CURRENCY), status: draft ? "draft" : "due",
   });
   if (error) throw new Error(error.message);
   if (!draft) await logEvent(sb, me.id, client_id, "invoice_issued", `Invoice issued: ${period}`, true);
@@ -484,7 +526,7 @@ export async function addExpenseAction(form: FormData) {
   const amount = num(form, "amount");
   if (!title || !(amount > 0)) throw new Error("Enter what it was for and an amount");
   const { error } = await sb.from("expenses").insert({
-    title, amount, category: str(form, "category") || "other", currency: str(form, "currency") || "GBP",
+    title, amount, category: str(form, "category") || "other", currency: cur(form, "currency"),
     incurred_on: str(form, "incurred_on") || new Date().toISOString().slice(0, 10), created_by: me.id,
   });
   if (error) throw new Error(error.message);
@@ -497,11 +539,13 @@ export async function addPayRecordAction(form: FormData) {
   const staff_id = str(form, "staff_id");
   const amount = num(form, "amount");
   if (!staff_id || !(amount > 0)) throw new Error("Pick a team member and enter an amount");
+  const { data: person } = await sb.from("profiles").select("pay_currency").eq("id", staff_id).single();
+  if (!person) throw new Error("Team member not found");
   const { error } = await sb.from("pay_records").insert({
     staff_id, amount,
     period_label: str(form, "period_label") || new Date().toLocaleString("en-GB", { month: "long", year: "numeric" }),
     kind: ["salary", "commission", "bonus", "reimbursement"].includes(str(form, "kind")) ? str(form, "kind") : "salary",
-    currency: str(form, "currency") || "GBP",
+    currency: cur(form, "currency", person.pay_currency),
     note: str(form, "note") || null,
   });
   if (error) throw new Error(error.message);
@@ -543,6 +587,7 @@ export async function createLoginAction(form: FormData) {
       can_manage_social: role === "developer" || role === "designer" || role === "marketing" ? can_manage_social : false,
       job_title: str(form, "job_title") || null,
       phone: str(form, "phone") || null,
+      pay_currency: cur(form, "pay_currency"),
     })
     .eq("id", data.user.id);
   if (pErr) throw new Error(pErr.message);
@@ -561,6 +606,7 @@ export async function updateMemberAction(form: FormData) {
     .update({
       role,
       job_title: str(form, "job_title") || null,
+      pay_currency: cur(form, "pay_currency"),
       can_manage_social: form.get("can_manage_social") === "on",
     })
     .eq("id", id)
@@ -577,6 +623,48 @@ export async function setAccountStatusAction(form: FormData) {
   if (!["active", "disabled"].includes(status)) return;
   await supabaseAdmin().from("profiles").update({ status }).eq("id", id);
   revalidatePath("/team");
+}
+
+/* ------------------------------------------------------------------ exchange rates (admin only) */
+// The admin types rates the natural way ("1 GBP = 111.50 INR"); we store pounds per unit.
+export async function saveRatesAction(form: FormData) {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const rows: { currency: string; gbp_per_unit: number; source: "manual"; updated_at: string }[] = [];
+  for (const c of CURRENCIES) {
+    if (c.code === BASE_CURRENCY) continue;
+    const raw = str(form, `rate_${c.code}`);
+    if (raw === "") continue;
+    const unitsPerPound = Number(raw);
+    if (!(unitsPerPound > 0) || !Number.isFinite(unitsPerPound)) throw new Error(`The ${c.code} rate must be a number above zero`);
+    rows.push({ currency: c.code, gbp_per_unit: 1 / unitsPerPound, source: "manual", updated_at: new Date().toISOString() });
+  }
+  if (rows.length === 0) return;
+  const { error } = await sb.from("fx_rates").upsert(rows, { onConflict: "currency" });
+  if (error) throw new Error(error.message);
+  revalidatePath("/finance");
+}
+
+export async function refreshRatesAction() {
+  await requireAdmin();
+  let json: unknown;
+  try {
+    const res = await fetch("https://open.er-api.com/v6/latest/GBP", { signal: AbortSignal.timeout(8000), cache: "no-store" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    json = await res.json();
+  } catch {
+    throw new Error("Couldn't reach the live exchange-rate service. Type the rates in by hand instead.");
+  }
+  const rates = ratesFromGbpBase(json);
+  if (!rates) throw new Error("The exchange-rate service sent something unexpected. Type the rates in by hand instead.");
+  const sb = await supabaseServer();
+  const now = new Date().toISOString();
+  const { error } = await sb.from("fx_rates").upsert(
+    Object.entries(rates).map(([currency, gbp_per_unit]) => ({ currency, gbp_per_unit, source: "live", updated_at: now })),
+    { onConflict: "currency" }
+  );
+  if (error) throw new Error(error.message);
+  revalidatePath("/finance");
 }
 
 /* ------------------------------------------------------------------ account */

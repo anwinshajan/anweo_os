@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import Shell, { Empty, fmtDate, label, money, showTotals, statusPill, totals } from "@/components/Shell";
 import UploadForm from "@/components/UploadForm";
+import CountryCurrency from "@/components/CountryCurrency";
+import CurrencySelect from "@/components/CurrencySelect";
 import {
   addInvoiceAction, addMilestoneAction, addPostAction, addWorkAction, assignServiceAction, createProjectAction,
   deleteDocumentAction, markInvoicePaidAction, removeServiceAction, sendDraftInvoiceAction, setClientStatusAction,
@@ -49,7 +51,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
             <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-forest text-2xl font-bold text-lime">{client.business_name[0]?.toUpperCase()}</span>
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-3xl font-bold tracking-tight sm:text-4xl">{client.business_name}{client.status === "archived" && <span className="pill ml-3 align-middle bg-charcoal/10 text-charcoal">archived</span>}</h1>
-              <p className="text-sm text-mute">{[client.contact_name, client.email, client.phone, client.country].filter(Boolean).join(" · ")}</p>
+              <p className="text-sm text-mute">{[client.contact_name, client.email, client.phone, client.country].filter(Boolean).join(" · ")} · <span className="font-mono text-[11px] text-forest">bills in {client.currency}</span></p>
             </div>
             <div className="flex items-center gap-3">
               {lead && <div className="text-right"><p className="tag">Monthly</p><p className="text-xl font-bold text-forest">{showTotals(monthly)}</p></div>}
@@ -68,7 +70,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
         {tab === "projects" && <Projects id={id} />}
         {tab === "documents" && <Documents id={id} lead={lead} />}
         {tab === "work" && <WorkAndContent id={id} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
-        {tab === "billing" && admin && <Billing id={id} />}
+        {tab === "billing" && admin && <Billing id={id} currency={client.currency} />}
       </div>
     </Shell>
   );
@@ -79,7 +81,7 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
   const sb = await supabaseServer();
   const [{ data: services }, { data: packages }, { data: subs }] = await Promise.all([
     lead ? sb.from("services").select("id,name").eq("active", true).order("sort_order") : Promise.resolve({ data: [] as any[] }),
-    lead ? sb.from("packages").select("id,service_id,name,price_monthly,currency").eq("active", true).order("price_monthly") : Promise.resolve({ data: [] as any[] }),
+    lead ? sb.from("packages").select("id,service_id,name,price_monthly,currency,prices").eq("active", true).order("price_monthly") : Promise.resolve({ data: [] as any[] }),
     lead ? sb.from("client_services").select("id,price_monthly,currency,status,services(name),packages(name)").eq("client_id", id).order("created_at") : Promise.resolve({ data: [] as any[] }),
   ]);
   return (
@@ -110,14 +112,17 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
               <select name="choice" required className="input">
                 {(services ?? []).map((s: any) => (
                   <optgroup key={s.id} label={s.name}>
-                    {(packages ?? []).filter((p: any) => p.service_id === s.id).map((p: any) => <option key={p.id} value={`${s.id}:${p.id}`}>{p.name} · {money(p.price_monthly, p.currency)}/mo</option>)}
+                    {(packages ?? []).filter((p: any) => p.service_id === s.id).map((p: any) => {
+                      const own = p.prices?.[client.currency];
+                      return <option key={p.id} value={`${s.id}:${p.id}`}>{p.name} · {own > 0 ? money(own, client.currency) : `${money(p.price_monthly, p.currency)} (no ${client.currency} price set)`}/mo</option>;
+                    })}
                     <option value={`${s.id}:`}>Custom price</option>
                   </optgroup>
                 ))}
               </select>
             </div>
             <div className="sm:col-span-2"><label className="label">Override price (optional)</label><input name="price_monthly" type="number" min="0" step="0.01" placeholder="Leave blank to use the package price" className="input" /></div>
-            <div><label className="label">Currency</label><select name="currency" className="input"><option>GBP</option><option>INR</option></select></div>
+            <div><label className="label">Currency</label><CurrencySelect defaultValue={client.currency} /></div>
             <div className="flex items-end"><button className="btn-primary w-full">Add service</button></div>
             <p className="text-xs text-mute sm:col-span-4">Choosing “Custom price” needs a price above. Manage packages under Services.</p>
           </form>
@@ -133,8 +138,9 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
             <div><label className="label">Contact person</label><input name="contact_name" defaultValue={client.contact_name ?? ""} className="input" /></div>
             <div><label className="label">Email</label><input name="email" type="email" defaultValue={client.email ?? ""} className="input" /></div>
             <div><label className="label">Phone / WhatsApp</label><input name="phone" defaultValue={client.phone ?? ""} className="input" /></div>
-            <div><label className="label">Country</label><select name="country" defaultValue={client.country ?? "India"} className="input"><option>India</option><option>United Kingdom</option><option>Other</option></select></div>
+            <CountryCurrency defaultCountry={client.country ?? "India"} defaultCurrency={client.currency} />
             <div className="sm:col-span-2"><label className="label">Internal notes</label><textarea name="notes" rows={3} defaultValue={client.notes ?? ""} className="input" /></div>
+            <p className="text-xs text-mute sm:col-span-2">Changing the billing currency only affects new invoices and services. Existing ones keep the currency they were created in.</p>
             <div className="sm:col-span-2"><button className="btn-primary">Save details</button></div>
           </form>
           <form action={setClientStatusAction} className="mt-4 border-t border-edge pt-4">
@@ -321,7 +327,7 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
 }
 
 /* ----------------------------------------------------------------- Billing (admin only) */
-async function Billing({ id }: { id: string }) {
+async function Billing({ id, currency }: { id: string; currency: string }) {
   const sb = await supabaseServer();
   const { data: invoices } = await sb.from("invoices").select("*").eq("client_id", id).order("issued_at", { ascending: false });
   const owed = totals((invoices ?? []).filter((i: any) => i.status === "due" || i.status === "overdue"));
@@ -349,7 +355,7 @@ async function Billing({ id }: { id: string }) {
         <input type="hidden" name="client_id" value={id} />
         <div><label className="label">Period</label><input name="period_label" placeholder="November 2026" className="input" /></div>
         <div><label className="label">Amount</label><input name="amount" type="number" min="1" step="0.01" required className="input" /></div>
-        <div><label className="label">Currency</label><select name="currency" className="input"><option>GBP</option><option>INR</option></select></div>
+        <div><label className="label">Currency</label><CurrencySelect defaultValue={currency} /></div>
         <div className="flex items-end"><button className="btn-primary w-full">Add invoice</button></div>
         <label className="flex items-center gap-2 text-sm sm:col-span-4"><input type="checkbox" name="draft" className="h-4 w-4 accent-forest" /> Save as draft (the client won't see it yet)</label>
       </form>

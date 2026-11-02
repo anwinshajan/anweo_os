@@ -2,6 +2,7 @@ import Link from "next/link";
 import { signOutAction } from "@/app/actions";
 import type { Me } from "@/lib/supabase-server";
 import { roleLabel, isAdminRole, isLeadRole } from "@/lib/roles";
+import { formatMoney } from "@/lib/currency";
 import { Logo } from "./Logo";
 import { BottomNav, TopNav, type NavItem } from "./NavLinks";
 
@@ -67,8 +68,7 @@ export default function Shell({ me, children }: { me: Me; children: React.ReactN
   );
 }
 
-export const money = (n: number | string, cur = "GBP") =>
-  new Intl.NumberFormat("en-GB", { style: "currency", currency: cur, maximumFractionDigits: 2 }).format(Number(n));
+export const money = (n: number | string, cur = "GBP") => formatMoney(n, cur);
 
 export const statusPill = (s: string) => {
   const good = "bg-lime-soft text-forest";

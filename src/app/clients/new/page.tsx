@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import Shell, { PageHead } from "@/components/Shell";
 import { createClientAction } from "@/app/actions";
+import CountryCurrency from "@/components/CountryCurrency";
 import { getMe } from "@/lib/supabase-server";
 import { isLeadRole } from "@/lib/roles";
 
@@ -22,8 +23,7 @@ export default async function NewClient() {
         <div><label className="label" htmlFor="contact_name">Contact person</label><input id="contact_name" name="contact_name" className="input" /></div>
         <div><label className="label" htmlFor="phone">Phone / WhatsApp</label><input id="phone" name="phone" inputMode="tel" className="input" /></div>
         <div><label className="label" htmlFor="email">Email</label><input id="email" name="email" type="email" className="input" /></div>
-        <div><label className="label" htmlFor="country">Country</label>
-          <select id="country" name="country" className="input" defaultValue="India"><option>India</option><option>United Kingdom</option><option>Other</option></select></div>
+        <CountryCurrency defaultCountry="India" />
         <div className="sm:col-span-2"><label className="label" htmlFor="notes">Internal notes (clients never see these)</label><textarea id="notes" name="notes" rows={3} className="input" /></div>
         <div className="flex gap-2 sm:col-span-2">
           <button className="btn-primary">Create client</button>

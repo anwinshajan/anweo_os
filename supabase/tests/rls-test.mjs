@@ -10,6 +10,7 @@ const sql = mig("0001_anweo_os.sql");
 const sql2 = mig("0002_activity_visibility.sql");
 const sql3 = mig("0003_roles.sql");
 const sql4 = mig("0004_phase2.sql");
+const sql6 = mig("0006_currencies.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -25,6 +26,7 @@ await db.exec(sql);
 await db.exec(sql2);
 await db.exec(sql3);
 await db.exec(sql4);
+await db.exec(sql6);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -338,6 +340,36 @@ await as(admin, async () => {
   await q(`update pay_records set status='paid', paid_at=current_date where staff_id='${dev}'`);
   ok("admin can mark pay as paid", true);
   ok("admin reads all documents", (await q(`select id from documents`)).rows.length === 4);
+});
+
+// =================== CURRENCIES ===================
+await as(admin, async () => {
+  await q(`insert into fx_rates(currency,gbp_per_unit,source) values ('INR',0.0095,'manual') on conflict (currency) do update set gbp_per_unit = excluded.gbp_per_unit`);
+  ok("admin can manage exchange rates", (await q(`select currency from fx_rates`)).rows.length === 2);
+  let b = false; try { await q(`insert into fx_rates(currency,gbp_per_unit) values ('USD',0)`); } catch { b = true; }
+  ok("a zero exchange rate is rejected", b);
+  b = false; try { await q(`insert into fx_rates(currency,gbp_per_unit) values ('usd',1.2)`); } catch { b = true; }
+  ok("currency codes must be 3 capital letters", b);
+  await q(`update clients set currency='INR' where id='${clB}'`);
+  ok("admin can set a client's currency", (await q(`select currency from clients where id='${clB}'`)).rows[0].currency === "INR");
+});
+for (const [name, uid] of [["manager", mgr], ["developer", dev], ["client", cA]]) {
+  await as(uid, async () => {
+    ok(`${name} cannot read exchange rates`, (await q(`select currency from fx_rates`)).rows.length === 0);
+    let b = false; try { await q(`insert into fx_rates(currency,gbp_per_unit) values ('EUR',0.85)`); } catch { b = true; }
+    ok(`${name} cannot write exchange rates`, b);
+  });
+}
+await as(mgr, async () => {
+  await q(`update packages set prices = '{"INR": 30000, "USD": 380}'::jsonb where name = 'Growth'`);
+  const g = (await q(`select prices from packages where name = 'Growth'`)).rows[0].prices;
+  ok("manager can set per-currency package prices", g.INR === 30000 && g.USD === 380);
+  let b = false; try { await q(`update clients set currency='rupees' where id='${clA}'`); } catch { b = true; }
+  ok("a client currency must be a 3-letter code", b);
+});
+await as(cA, async () => {
+  const p = (await q(`select prices from packages where name = 'Growth'`)).rows[0];
+  ok("clients can read package prices in their currency", p.prices.INR === 30000);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

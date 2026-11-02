@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import Shell, { Empty, PageHead, statusPill } from "@/components/Shell";
+import CurrencySelect from "@/components/CurrencySelect";
 import { createLoginAction, setAccountStatusAction, updateMemberAction } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { STAFF_ROLES, isAdminRole, roleLabel } from "@/lib/roles";
@@ -12,7 +13,7 @@ export default async function Team() {
   if (me.status !== "active" || !isAdminRole(me.role)) redirect("/");
   const sb = await supabaseServer();
   const [{ data: people }, { data: clients }] = await Promise.all([
-    sb.from("profiles").select("id,full_name,email,role,status,can_manage_social,job_title,phone,clients(business_name)").order("created_at"),
+    sb.from("profiles").select("id,full_name,email,role,status,can_manage_social,job_title,phone,pay_currency,clients(business_name)").order("created_at"),
     sb.from("clients").select("id,business_name").order("business_name"),
   ]);
   const staff = (people ?? []).filter((p: any) => p.role !== "client");
@@ -39,6 +40,7 @@ export default async function Team() {
             <select name="client_id" className="input"><option value="">None</option>{(clients ?? []).map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select></div>
           <div><label className="label">Job title (optional)</label><input name="job_title" placeholder="e.g. Senior editor" className="input" /></div>
           <div><label className="label">Phone / WhatsApp (optional)</label><input name="phone" className="input" /></div>
+          <div><label className="label">Paid in (team members)</label><CurrencySelect name="pay_currency" /></div>
           <label className="flex items-end gap-2 pb-2.5 text-sm"><input type="checkbox" name="can_manage_social" className="h-4 w-4 accent-forest" /> Can also create social posts</label>
           <div className="sm:col-span-2"><button className="btn-primary">Create login</button></div>
         </form>
@@ -54,7 +56,7 @@ export default async function Team() {
               <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{p.full_name || p.email}{p.id === me.id && <span className="ml-2 font-mono text-[10px] uppercase text-mute">you</span>}</p>
-                  <p className="truncate font-mono text-[11px] text-mute">{p.email} · {p.job_title || roleLabel[p.role as keyof typeof roleLabel]}{p.can_manage_social && p.role !== "admin" && p.role !== "manager" && p.role !== "social_manager" ? " · social access" : ""}</p>
+                  <p className="truncate font-mono text-[11px] text-mute">{p.email} · {p.job_title || roleLabel[p.role as keyof typeof roleLabel]} · paid in {p.pay_currency}{p.can_manage_social && p.role !== "admin" && p.role !== "manager" && p.role !== "social_manager" ? " · social access" : ""}</p>
                 </div>
                 <span className={`pill ${statusPill(p.status)}`}>{p.status}</span>
               </summary>
@@ -63,7 +65,8 @@ export default async function Team() {
                   <input type="hidden" name="id" value={p.id} />
                   <div><label className="label">Role</label>
                     <select name="role" defaultValue={p.role} className="input">{STAFF_ROLES.map((r) => <option key={r} value={r}>{roleLabel[r]}</option>)}</select></div>
-                  <div className="sm:col-span-2"><label className="label">Job title</label><input name="job_title" defaultValue={p.job_title ?? ""} className="input" /></div>
+                  <div><label className="label">Job title</label><input name="job_title" defaultValue={p.job_title ?? ""} className="input" /></div>
+                  <div><label className="label">Paid in</label><CurrencySelect name="pay_currency" defaultValue={p.pay_currency} /></div>
                   <label className="flex items-end gap-2 pb-2.5 text-sm"><input type="checkbox" name="can_manage_social" defaultChecked={p.can_manage_social} className="h-4 w-4 accent-forest" /> Social posts</label>
                   <div className="sm:col-span-4"><button className="btn-primary">Save changes</button></div>
                 </form>
