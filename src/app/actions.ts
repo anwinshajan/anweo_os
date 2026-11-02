@@ -974,3 +974,36 @@ export const updatePayRecordAction = safe(async (form: FormData) => {
   revalidatePath("/transactions"); revalidatePath("/finance"); revalidatePath("/transactions"); revalidatePath("/pay");
   redirect(backTo(form));
 });
+
+/* ------------------------------------------------------------ editing projects */
+export const updateProjectAction = safe(async (form: FormData) => {
+  await requireLead();
+  const sb = await supabaseServer();
+  const title = str(form, "title");
+  if (!title) throw new Error("Give the project a title");
+  const { error } = await sb.from("projects").update({
+    title, description: str(form, "description") || null,
+    start_date: str(form, "start_date") || null, due_date: str(form, "due_date") || null,
+    visible_to_client: form.get("visible") === "on",
+  }).eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`);
+  revalidatePath("/");
+});
+
+export const deleteProjectAction = safe(async (form: FormData) => {
+  await requireLead();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("projects").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`);
+  revalidatePath("/");
+});
+
+export const deleteMilestoneAction = safe(async (form: FormData) => {
+  await requireStaff();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("milestones").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`);
+});

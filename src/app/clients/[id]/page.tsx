@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import Shell, { Empty, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import UploadForm from "@/components/UploadForm";
 import BillingTab from "./BillingTab";
+import ProjectsTab from "./ProjectsTab";
 import CountryCurrency from "@/components/CountryCurrency";
 import CurrencySelect from "@/components/CurrencySelect";
 import {
@@ -64,7 +65,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Link href={`/chat/c/${id}`} className="btn-lime">Open chat</Link>
-            {lead && <p className="text-sm text-mute">Monthly: {Object.keys(monthly).length ? <Totals t={monthly} className="inline font-bold text-forest" /> : <span className="font-medium text-ink/70">no monthly services yet</span>}</p>}
+            {lead && <div className="flex items-center gap-2 text-sm text-mute"><span>Monthly:</span>{Object.keys(monthly).length ? <Totals t={monthly} className="font-bold text-forest" /> : <span className="font-medium text-ink/70">no monthly services yet</span>}</div>}
           </div>
         </div>
 
@@ -74,8 +75,8 @@ export default async function ClientDetail({ params, searchParams }: { params: P
           ))}
         </nav>
 
-        {tab === "overview" && <Overview id={id} client={client} lead={lead} />}
-        {tab === "projects" && <Projects id={id} admin={admin} client={client} />}
+        {tab === "overview" && <Overview id={id} client={client} lead={lead} admin={admin} />}
+        {tab === "projects" && <ProjectsTab id={id} admin={admin} client={client} />}
         {tab === "documents" && <Documents id={id} lead={lead} />}
         {tab === "work" && <WorkAndContent id={id} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
         {tab === "billing" && admin && <BillingTab id={id} client={client} />}
@@ -85,7 +86,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
 }
 
 /* ----------------------------------------------------------------- Overview */
-async function Overview({ id, client, lead }: { id: string; client: any; lead: boolean }) {
+async function Overview({ id, client, lead, admin }: { id: string; client: any; lead: boolean; admin: boolean }) {
   const sb = await supabaseServer();
   const [{ data: services }, { data: packages }, { data: subs }] = await Promise.all([
     lead ? sb.from("services").select("id,name").eq("active", true).order("sort_order") : Promise.resolve({ data: [] as any[] }),
@@ -112,7 +113,7 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
             </div>
           ))}
         </div>
-        {lead && (services ?? []).length > 0 && <AddServiceForm clientId={id} currency={client.currency} services={services ?? []} packages={packages ?? []} />}
+        {lead && (services ?? []).length > 0 && <AddServiceForm clientId={id} currency={client.currency} services={services ?? []} packages={packages ?? []} canPrice={admin} />}
         {lead && (services ?? []).length === 0 && <p className="mt-4 text-sm text-mute">No services set up yet. Add them under Services first.</p>}
       </section>
 
@@ -138,90 +139,6 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
           </Form>
         </section>
       )}
-    </>
-  );
-}
-
-/* ----------------------------------------------------------------- Projects */
-async function Projects({ id, admin, client }: { id: string; admin: boolean; client: any }) {
-  const sb = await supabaseServer();
-  const { data: projects } = await sb.from("projects").select("id,title,description,status,start_date,due_date,visible_to_client,milestones(id,title,done,due_date,sort_order)").eq("client_id", id).order("created_at", { ascending: false });
-  const { data: plans } = admin ? await sb.from("payment_plans").select("project_id,total_amount,currency,status,plan_installments(label,invoice_id,invoices(status))").not("project_id", "is", null).eq("client_id", id) : { data: [] as any[] };
-  const planOf = new Map((plans ?? []).map((pl: any) => [pl.project_id, pl]));
-  return (
-    <>
-      <div className="space-y-4">
-        {(projects ?? []).length === 0 && <Empty>No projects yet. Create the first one below.</Empty>}
-        {(projects ?? []).map((p: any) => {
-          const ms = [...(p.milestones ?? [])].sort((a: any, b: any) => a.sort_order - b.sort_order);
-          const done = ms.filter((m: any) => m.done).length;
-          const pct = ms.length ? Math.round((done / ms.length) * 100) : p.status === "completed" ? 100 : 0;
-          return (
-            <section key={p.id} className="card">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="text-xl font-bold tracking-tight">{p.title}{!p.visible_to_client && <span className="ml-2 font-mono text-[10px] uppercase text-mute">internal</span>}</h2>
-                  <p className="font-mono text-[11px] text-mute">{[p.start_date && `Start ${fmtDate(p.start_date)}`, p.due_date && `Due ${fmtDate(p.due_date)}`].filter(Boolean).join(" · ")}</p>
-                </div>
-                <Form action={setProjectStatusAction} className="flex items-center gap-2">
-                  <input type="hidden" name="id" value={p.id} /><input type="hidden" name="client_id" value={id} />
-                  <select key={p.status} name="status" defaultValue={p.status} className="input !w-auto !py-1.5 !text-xs">{["planning", "in_progress", "review", "completed", "on_hold"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
-                  <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
-                </Form>
-              </div>
-              {p.description && <p className="mt-2 text-sm text-ink/70">{p.description}</p>}
-              {admin && (() => {
-                const pl: any = planOf.get(p.id);
-                if (!pl) return <p className="mt-2 text-xs text-mute">No price set. <Link href={`/clients/${id}?tab=billing`} className="font-medium text-forest hover:underline">Add payments in Billing →</Link></p>;
-                const ins = pl.plan_installments ?? [];
-                const paid = ins.filter((i: any) => i.invoices?.status === "paid").length;
-                const sent = ins.filter((i: any) => i.invoice_id).length;
-                return <p className="mt-2 text-sm"><span className="font-semibold">{money(pl.total_amount, pl.currency)}</span> <span className="text-mute">· {paid} of {ins.length} paid · {sent} invoiced · </span><Link href={`/clients/${id}?tab=billing`} className="text-xs font-medium text-forest hover:underline">Billing →</Link></p>;
-              })()}
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-forest-soft"><div className="h-full rounded-full bg-lime-deep" style={{ width: `${pct}%` }} /></div>
-              <p className="mt-1 font-mono text-[11px] text-mute">{pct}% complete</p>
-              <ul className="mt-3 space-y-1.5">
-                {ms.map((m: any) => (
-                  <li key={m.id}>
-                    <Form action={toggleMilestoneAction} className="flex items-center gap-2.5 text-sm">
-                      <input type="hidden" name="id" value={m.id} /><input type="hidden" name="client_id" value={id} />
-                      <button name="done" value={m.done ? "false" : "true"} aria-label={m.done ? "Mark not done" : "Mark done"} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${m.done ? "bg-forest text-lime" : "border border-edge bg-white hover:border-forest"}`}>{m.done ? "✓" : ""}</button>
-                      <span className={m.done ? "text-mute line-through" : ""}>{m.title}</span>
-                      {m.due_date && <span className="font-mono text-[10px] text-mute">{fmtDate(m.due_date)}</span>}
-                    </Form>
-                  </li>
-                ))}
-              </ul>
-              <Form action={addMilestoneAction} className="mt-4 grid gap-2 border-t border-edge pt-4 sm:grid-cols-[1fr_auto_auto]">
-                <input type="hidden" name="project_id" value={p.id} /><input type="hidden" name="client_id" value={id} />
-                <input name="title" required placeholder="Add a milestone" className="input" aria-label="Milestone" />
-                <input name="due_date" type="date" className="input" aria-label="Due date" />
-                <button className="btn-ghost">Add</button>
-              </Form>
-            </section>
-          );
-        })}
-      </div>
-      <section className="card">
-        <p className="tag mb-3">[ New project ]</p>
-        <Form action={createProjectAction} className="grid gap-3 sm:grid-cols-4">
-          <input type="hidden" name="client_id" value={id} />
-          <div className="sm:col-span-2"><label className="label">Title *</label><input name="title" required className="input" placeholder="e.g. Website redesign" /></div>
-          <div><label className="label">Start</label><input name="start_date" type="date" className="input" /></div>
-          <div><label className="label">Due</label><input name="due_date" type="date" className="input" /></div>
-          <div className="sm:col-span-4"><label className="label">What's included</label><textarea name="description" rows={2} className="input" /></div>
-          {admin && (
-            <div className="grid gap-3 rounded-xl bg-paper/70 p-3 sm:col-span-4 sm:grid-cols-4">
-              <div className="sm:col-span-4"><p className="font-semibold">Price (optional)</p><p className="text-xs text-mute">The advance is invoiced now. The rest is invoiced automatically when you mark the project completed.</p></div>
-              <div className="sm:col-span-2"><label className="label">Total price</label><input name="price" type="number" min="0" step="0.01" placeholder="e.g. 60000" className="input" /></div>
-              <div><label className="label">Currency</label><CurrencySelect short defaultValue={client.currency} /></div>
-              <div><label className="label">Advance</label><select name="advance" defaultValue="50" className="input"><option value="0">None, pay on delivery</option><option value="30">30% now</option><option value="50">50% now</option><option value="70">70% now</option><option value="100">100% now</option></select></div>
-            </div>
-          )}
-          <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" name="visible" defaultChecked className="h-4 w-4 accent-forest" /> Show to the client</label>
-          <div><button className="btn-primary w-full">Create project</button></div>
-        </Form>
-      </section>
     </>
   );
 }
