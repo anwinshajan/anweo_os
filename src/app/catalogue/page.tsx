@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Form from "@/components/Form";
 import Shell, { Empty, PageHead, money } from "@/components/Shell";
 import CurrencySelect from "@/components/CurrencySelect";
 import { createPackageAction, createServiceAction, togglePackageAction, toggleServiceAction, updatePackageAction } from "@/app/actions";
@@ -52,11 +53,11 @@ export default async function Catalogue() {
         <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold">
           <span>Add a service</span><span className="btn-lime !px-3 !py-1 text-xs group-open:hidden">+ New</span>
         </summary>
-        <form action={createServiceAction} className="mt-5 grid gap-3 sm:grid-cols-3">
+        <Form action={createServiceAction} className="mt-5 grid gap-3 sm:grid-cols-3">
           <div><label className="label">Name *</label><input name="name" required className="input" placeholder="e.g. Brand Identity" /></div>
           <div className="sm:col-span-2"><label className="label">Description</label><input name="description" className="input" /></div>
           <div className="sm:col-span-3"><button className="btn-primary">Create service</button></div>
-        </form>
+        </Form>
       </details>
 
       <div className="space-y-5">
@@ -70,10 +71,10 @@ export default async function Catalogue() {
                   <h2 className="text-xl font-bold tracking-tight">{s.name}</h2>
                   {s.description && <p className="mt-0.5 text-sm text-mute">{s.description}</p>}
                 </div>
-                <form action={toggleServiceAction}>
+                <Form action={toggleServiceAction}>
                   <input type="hidden" name="id" value={s.id} />
                   <button name="active" value={s.active ? "false" : "true"} className="btn-ghost !px-3 !py-1.5 text-xs">{s.active ? "Hide service" : "Show service"}</button>
-                </form>
+                </Form>
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -95,7 +96,7 @@ export default async function Catalogue() {
                       )}
                       <details className="mt-4 border-t border-edge pt-3">
                         <summary className="cursor-pointer text-xs font-semibold text-forest">Edit prices & details</summary>
-                        <form action={updatePackageAction} className="mt-3 grid gap-3 sm:grid-cols-4">
+                        <Form action={updatePackageAction} className="mt-3 grid gap-3 sm:grid-cols-4">
                           <input type="hidden" name="id" value={p.id} />
                           <div className="sm:col-span-4"><label className="label">Name</label><input name="name" required defaultValue={p.name} className="input" /></div>
                           <div className="sm:col-span-2"><label className="label">Main price</label><input name="price_monthly" type="number" min="0" step="0.01" required defaultValue={p.price_monthly} className="input" /></div>
@@ -104,12 +105,12 @@ export default async function Catalogue() {
                           <div className="sm:col-span-4"><label className="label">Short description</label><input name="description" defaultValue={p.description ?? ""} className="input" /></div>
                           <div className="sm:col-span-4"><label className="label">What's included (one per line)</label><textarea name="features" rows={4} defaultValue={(p.features ?? []).join("\n")} className="input" /></div>
                           <div className="sm:col-span-4"><button className="btn-primary">Save package</button></div>
-                        </form>
+                        </Form>
                       </details>
-                      <form action={togglePackageAction} className="mt-3">
+                      <Form action={togglePackageAction} className="mt-3">
                         <input type="hidden" name="id" value={p.id} />
                         <button name="active" value={p.active ? "false" : "true"} className="text-xs font-medium text-mute hover:text-ink hover:underline">{p.active ? "Retire package" : "Bring back"}</button>
-                      </form>
+                      </Form>
                     </div>
                   );
                 })}
@@ -117,7 +118,7 @@ export default async function Catalogue() {
 
               <details className="mt-4 border-t border-edge pt-4">
                 <summary className="cursor-pointer text-sm font-semibold text-forest">+ Add a package</summary>
-                <form action={createPackageAction} className="mt-4 grid gap-3 sm:grid-cols-4">
+                <Form action={createPackageAction} className="mt-4 grid gap-3 sm:grid-cols-4">
                   <input type="hidden" name="service_id" value={s.id} />
                   <div className="sm:col-span-2"><label className="label">Package name *</label><input name="name" required placeholder="e.g. Growth" className="input" /></div>
                   <div><label className="label">Main price *</label><input name="price_monthly" type="number" min="0" step="0.01" required className="input" /></div>
@@ -126,7 +127,7 @@ export default async function Catalogue() {
                   <div className="sm:col-span-4"><label className="label">Short description</label><input name="description" className="input" /></div>
                   <div className="sm:col-span-4"><label className="label">What's included (one per line)</label><textarea name="features" rows={4} placeholder={"12 posts per month\n4 reels\nMonthly report"} className="input" /></div>
                   <div className="sm:col-span-4"><button className="btn-primary">Save package</button></div>
-                </form>
+                </Form>
                 <p className="mt-2 text-xs text-mute">The extra-price boxes above are for currencies other than GBP. If you pick a different main currency, its own box is ignored.</p>
               </details>
             </section>

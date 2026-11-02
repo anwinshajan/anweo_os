@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Form from "@/components/Form";
 import { redirect } from "next/navigation";
 import Shell, { Empty, PageHead, fmtDate, label } from "@/components/Shell";
 import { setWorkStatusAction } from "@/app/actions";
@@ -24,7 +25,7 @@ export default async function Tasks() {
   const done = (mine ?? []).filter((t: any) => t.status === "done").slice(0, 8);
 
   const Row = ({ t }: { t: any }) => (
-    <form action={setWorkStatusAction} className="row flex-wrap">
+    <Form action={setWorkStatusAction} className="row flex-wrap">
       <input type="hidden" name="id" value={t.id} /><input type="hidden" name="client_id" value={t.client_id} />
       <div className="min-w-0">
         <p className="truncate font-medium">{t.title}</p>
@@ -34,7 +35,7 @@ export default async function Tasks() {
         <select key={t.status} name="status" defaultValue={t.status} className="input !w-auto !py-1.5 !text-xs">{["todo", "in_progress", "review", "done"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
         <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
       </span>
-    </form>
+    </Form>
   );
 
   return (

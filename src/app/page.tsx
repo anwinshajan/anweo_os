@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Form from "@/components/Form";
 import { redirect } from "next/navigation";
 import Shell, { Empty, PageHead, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import { Corner, Logo } from "@/components/Logo";
@@ -305,12 +306,12 @@ async function ClientPortal({ me }: { me: Me }) {
                 <p className="mt-2 text-xs text-forest">Accepted by {d.signed_by_name} on {fmtDate(d.signed_at, true)}.</p>
               )}
               {d.kind === "contract" && d.status === "sent" && (
-                <form action={signDocumentAction} className="mt-3 grid gap-2 border-t border-edge pt-3 sm:grid-cols-[1fr_auto]">
+                <Form action={signDocumentAction} className="mt-3 grid gap-2 border-t border-edge pt-3 sm:grid-cols-[1fr_auto]">
                   <input type="hidden" name="id" value={d.id} />
                   <div><label className="label">Type your full name to accept</label><input name="signer" required minLength={2} className="input" autoComplete="name" /></div>
                   <label className="flex items-center gap-2 text-xs sm:col-span-2"><input type="checkbox" name="agree" required className="h-4 w-4 accent-forest" /> I have read this contract and I agree to it.</label>
                   <div className="sm:col-span-2"><button className="btn-primary">Accept contract</button></div>
-                </form>
+                </Form>
               )}
             </div>
           ))}

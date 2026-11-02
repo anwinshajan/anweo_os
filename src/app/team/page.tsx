@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Form from "@/components/Form";
 import Shell, { Empty, PageHead, statusPill } from "@/components/Shell";
 import CurrencySelect from "@/components/CurrencySelect";
 import { createLoginAction, setAccountStatusAction, updateMemberAction } from "@/app/actions";
@@ -27,7 +28,7 @@ export default async function Team() {
         <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold">
           <span>Create a login</span><span className="btn-lime !px-3 !py-1 text-xs group-open:hidden">+ New</span>
         </summary>
-        <form action={createLoginAction} className="mt-5 grid gap-3 sm:grid-cols-2">
+        <Form action={createLoginAction} className="mt-5 grid gap-3 sm:grid-cols-2">
           <div><label className="label">Full name</label><input name="full_name" required className="input" /></div>
           <div><label className="label">Email</label><input name="email" type="email" required className="input" /></div>
           <div><label className="label">Temporary password (10+ characters)</label><input name="password" type="password" minLength={10} required autoComplete="new-password" className="input" /></div>
@@ -43,7 +44,7 @@ export default async function Team() {
           <div><label className="label">Paid in (team members)</label><CurrencySelect name="pay_currency" /></div>
           <label className="flex items-end gap-2 pb-2.5 text-sm"><input type="checkbox" name="can_manage_social" className="h-4 w-4 accent-forest" /> Can also create social posts</label>
           <div className="sm:col-span-2"><button className="btn-primary">Create login</button></div>
-        </form>
+        </Form>
         <p className="mt-3 text-xs text-mute">Tell the person to change their password under My account after their first sign-in.</p>
       </details>
 
@@ -61,7 +62,7 @@ export default async function Team() {
                 <span className={`pill ${statusPill(p.status)}`}>{p.status}</span>
               </summary>
               <div className="mt-4 grid gap-3 border-t border-edge pt-4 sm:grid-cols-3">
-                <form action={updateMemberAction} className="grid gap-3 sm:col-span-3 sm:grid-cols-4">
+                <Form action={updateMemberAction} className="grid gap-3 sm:col-span-3 sm:grid-cols-4">
                   <input type="hidden" name="id" value={p.id} />
                   <div><label className="label">Role</label>
                     <select name="role" defaultValue={p.role} className="input">{STAFF_ROLES.map((r) => <option key={r} value={r}>{roleLabel[r]}</option>)}</select></div>
@@ -69,12 +70,12 @@ export default async function Team() {
                   <div><label className="label">Paid in</label><CurrencySelect name="pay_currency" defaultValue={p.pay_currency} /></div>
                   <label className="flex items-end gap-2 pb-2.5 text-sm"><input type="checkbox" name="can_manage_social" defaultChecked={p.can_manage_social} className="h-4 w-4 accent-forest" /> Social posts</label>
                   <div className="sm:col-span-4"><button className="btn-primary">Save changes</button></div>
-                </form>
+                </Form>
                 {p.id !== me.id && (
-                  <form action={setAccountStatusAction} className="sm:col-span-3">
+                  <Form action={setAccountStatusAction} className="sm:col-span-3">
                     <input type="hidden" name="id" value={p.id} />
                     <button name="status" value={p.status === "active" ? "disabled" : "active"} className="btn-ghost text-xs">{p.status === "active" ? "Disable this login" : "Re-enable this login"}</button>
-                  </form>
+                  </Form>
                 )}
               </div>
             </details>
@@ -90,7 +91,7 @@ export default async function Team() {
               <div className="min-w-0"><p className="truncate font-medium">{p.full_name || p.email}</p><p className="truncate font-mono text-[11px] text-mute">{p.email} · {p.clients?.business_name ?? "not linked"}</p></div>
               <div className="flex items-center gap-2">
                 <span className={`pill ${statusPill(p.status)}`}>{p.status}</span>
-                <form action={setAccountStatusAction}><input type="hidden" name="id" value={p.id} /><button name="status" value={p.status === "active" ? "disabled" : "active"} className="btn-ghost !px-3 !py-1.5 text-xs">{p.status === "active" ? "Disable" : "Activate"}</button></form>
+                <Form action={setAccountStatusAction}><input type="hidden" name="id" value={p.id} /><button name="status" value={p.status === "active" ? "disabled" : "active"} className="btn-ghost !px-3 !py-1.5 text-xs">{p.status === "active" ? "Disable" : "Activate"}</button></Form>
               </div>
             </div>
           ))}

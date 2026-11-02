@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Form from "@/components/Form";
 import { redirect } from "next/navigation";
 import Shell, { PageHead } from "@/components/Shell";
 import ChangePassword from "@/components/ChangePassword";
@@ -18,11 +19,11 @@ export default async function Account() {
       <div className="grid max-w-3xl gap-5">
         <section className="card">
           <p className="tag mb-3">[ Profile ]</p>
-          <form action={updateOwnProfileAction} className="grid gap-3 sm:grid-cols-2">
+          <Form action={updateOwnProfileAction} className="grid gap-3 sm:grid-cols-2">
             <div><label className="label">Full name</label><input name="full_name" required defaultValue={me.full_name ?? ""} className="input" autoComplete="name" /></div>
             <div><label className="label">Phone / WhatsApp</label><input name="phone" defaultValue={me.phone ?? ""} className="input" autoComplete="tel" /></div>
             <div className="sm:col-span-2"><button className="btn-primary">Save profile</button></div>
-          </form>
+          </Form>
         </section>
         <section className="card">
           <p className="tag mb-3">[ Password ]</p>

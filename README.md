@@ -92,3 +92,11 @@ Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141
 Every invoice has a branded page (`/invoices/<id>`, print-ready A4) and a PDF download in the Anweo template: logo, billed-to / from, dates, amount due, how to pay, payment terms. The admin sets the company name, address, tax number and bank/UPI details under **Settings**, and each client's billing address and tax ID on their details tab. Invoice numbers (`ANW-0001`) are assigned automatically.
 
 Limits: invoices show a tax number but do not calculate VAT/GST (add it into the amount if it applies), and in the PDF the rupee is shown as "INR 42,000.00" because the embedded font has no rupee glyph (the on-screen invoice shows ₹).
+
+## Transactions (admin only)
+
+`/transactions` lists every invoice, expense and team payment in one place, newest first, with money in, money out, net and still-to-collect per currency. Filter by type, status, currency, date or search text; edit, delete or mark paid on any row; add expenses and team payments; export what you see as CSV. Finance keeps the overview (overdue, ready to invoice, late fees).
+
+## Smoothness and errors
+
+Pages show a skeleton immediately while loading, forms lock their buttons while saving (no double submits), and every save shows a small confirmation. Server-side validation errors come back as a message toast instead of a broken page (production hides thrown messages, so actions return them).

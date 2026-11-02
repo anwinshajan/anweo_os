@@ -1,11 +1,11 @@
 import Link from "next/link";
+import Form from "@/components/Form";
 import { redirect } from "next/navigation";
-import Shell, { Empty, PageHead, Totals, fmtDate, money, showTotals, statusPill, totals } from "@/components/Shell";
-import CurrencySelect from "@/components/CurrencySelect";
+import Shell, { Empty, PageHead, Totals, fmtDate, money, statusPill, totals } from "@/components/Shell";
 import DeleteButton from "@/components/DeleteButton";
-import { deleteExpenseAction, deleteInvoiceAction, deletePayRecordAction, addExpenseAction, addPayRecordAction, chargeLateInterestAction, markInvoicePaidAction, markPayPaidAction, runBillingAction } from "@/app/actions";
+import { chargeLateInterestAction, deleteInvoiceAction, markInvoicePaidAction, runBillingAction } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
-import { isAdminRole, roleLabel } from "@/lib/roles";
+import { isAdminRole } from "@/lib/roles";
 import { addDays, effectiveDueDate, intervalLabel, isOverdue, isoDay, lateInterest } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
@@ -19,13 +19,12 @@ export default async function Finance() {
   const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString().slice(0, 10);
 
   const today = isoDay();
-  const [{ data: subs }, { data: unpaid }, { data: paidInv }, { data: expenses }, { data: pay }, { data: staff }, { data: dueRecurring }, { data: dueInstallments }] = await Promise.all([
+  const [{ data: subs }, { data: unpaid }, { data: paidInv }, { data: expenses }, { data: pay }, { data: dueRecurring }, { data: dueInstallments }] = await Promise.all([
     sb.from("client_services").select("price_monthly,currency").eq("status", "active"),
     sb.from("invoices").select("id,client_id,period_label,amount,currency,status,issued_at,due_date,late_fee_charged,clients(business_name,payment_terms_days,late_grace_days,late_interest_percent)").in("status", ["due", "overdue"]).order("issued_at"),
     sb.from("invoices").select("amount,currency,paid_at").eq("status", "paid").gte("paid_at", monthStart),
     sb.from("expenses").select("id,title,category,amount,currency,incurred_on").order("incurred_on", { ascending: false }).limit(200),
     sb.from("pay_records").select("id,staff_id,period_label,kind,amount,currency,status,paid_at,note,profiles(full_name,email,role)").order("created_at", { ascending: false }).limit(200),
-    sb.from("profiles").select("id,full_name,email,role,pay_currency").neq("role", "client").eq("status", "active").order("full_name"),
     sb.from("payment_plans").select("id,client_id,title,currency,recurring_amount,billing_interval,next_invoice_date,auto_invoice,clients(business_name)").eq("kind", "recurring").eq("status", "active").lte("next_invoice_date", today),
     sb.from("plan_installments").select("id,label,amount,due_date,payment_plans!inner(client_id,title,currency,status,kind,clients(business_name))").is("invoice_id", null).not("due_date", "is", null).lte("due_date", addDays(today, 7)).eq("payment_plans.status", "active").eq("payment_plans.kind", "one_time"),
   ]);
@@ -89,10 +88,10 @@ export default async function Finance() {
                 </div>
               ))}
             </div>
-            <form action={runBillingAction} className="mt-4 flex flex-wrap items-center gap-3">
+            <Form action={runBillingAction} className="mt-4 flex flex-wrap items-center gap-3">
               <button className="btn-primary">Create these invoices now</button>
               <span className="text-xs text-forest/80">Each one is created once. Recurring plans set to automatic are also created by themselves every morning.</span>
-            </form>
+            </Form>
           </div>
         </section>
       )}
@@ -110,68 +109,19 @@ export default async function Finance() {
               <span className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold">{money(i.amount, i.currency)}</span>
                 <span className={`pill ${statusPill(i.late ? "overdue" : i.status)}`}>{i.late ? "overdue" : i.status}</span>
-                <form action={markInvoicePaidAction}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="client_id" value={i.client_id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></form>
-                <form action={deleteInvoiceAction}><input type="hidden" name="id" value={i.id} /><DeleteButton message="Delete this invoice permanently? If it came from a payment plan, that payment becomes un-invoiced and may be invoiced again. To keep a record without billing, mark it paid instead." /></form>
-                {i.late && i.unbilled >= 0.01 && <form action={chargeLateInterestAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-amber-800 hover:underline">Charge {money(i.unbilled, i.currency)} interest</button></form>}
+                <Form action={markInvoicePaidAction}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="client_id" value={i.client_id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></Form>
+                <Form action={deleteInvoiceAction}><input type="hidden" name="id" value={i.id} /><DeleteButton message="Delete this invoice permanently? If it came from a payment plan, that payment becomes un-invoiced and may be invoiced again. To keep a record without billing, mark it paid instead." /></Form>
+                {i.late && i.unbilled >= 0.01 && <Form action={chargeLateInterestAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-amber-800 hover:underline">Charge {money(i.unbilled, i.currency)} interest</button></Form>}
               </span>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="mb-8">
-        <p className="tag mb-3">[ Payroll · pending {showTotals(pendingPay)} ]</p>
-        <div className="card mb-3">
-          <form action={addPayRecordAction} className="grid gap-3 sm:grid-cols-6">
-            <div className="sm:col-span-2"><label className="label">Team member</label>
-              <select name="staff_id" required className="input"><option value="">Choose…</option>{(staff ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.full_name || s.email} · {roleLabel[s.role as keyof typeof roleLabel]} · paid in {s.pay_currency}</option>)}</select></div>
-            <div><label className="label">Type</label><select name="kind" className="input"><option value="salary">Salary</option><option value="commission">Commission</option><option value="bonus">Bonus</option><option value="reimbursement">Reimbursement</option></select></div>
-            <div><label className="label">Period</label><input name="period_label" placeholder="November 2026" className="input" /></div>
-            <div><label className="label">Amount</label><input name="amount" type="number" min="1" step="0.01" required className="input" /></div>
-            <div><label className="label">Currency</label><CurrencySelect defaultValue="" extraFirst={{ value: "", label: "Their usual" }} /></div>
-            <div className="sm:col-span-5"><input name="note" placeholder="Note (optional)" className="input" aria-label="Note" /></div>
-            <div><button className="btn-primary w-full">Add</button></div>
-          </form>
-        </div>
-        <div className="space-y-2">
-          {(pay ?? []).length === 0 && <Empty>No payroll records yet.</Empty>}
-          {(pay ?? []).slice(0, 40).map((p: any) => (
-            <div key={p.id} className="row flex-wrap">
-              <div className="min-w-0">
-                <p className="truncate font-medium">{p.profiles?.full_name || p.profiles?.email}</p>
-                <p className="font-mono text-[11px] uppercase text-mute">{p.kind} · {p.period_label}{p.note ? ` · ${p.note}` : ""}{p.paid_at ? ` · paid ${fmtDate(p.paid_at)}` : ""}</p>
-              </div>
-              <span className="flex items-center gap-2">
-                <span className="font-semibold">{money(p.amount, p.currency)}</span>
-                <span className={`pill ${statusPill(p.status)}`}>{p.status}</span>
-                {p.status === "pending" && <form action={markPayPaidAction}><input type="hidden" name="id" value={p.id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></form>}
-                <form action={deletePayRecordAction}><input type="hidden" name="id" value={p.id} /><DeleteButton message="Delete this pay record permanently?" /></form>
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <p className="tag mb-3">[ Expenses ]</p>
-        <div className="card mb-3">
-          <form action={addExpenseAction} className="grid gap-3 sm:grid-cols-6">
-            <div className="sm:col-span-2"><label className="label">What for *</label><input name="title" required placeholder="e.g. Canva subscription" className="input" /></div>
-            <div><label className="label">Category</label>
-              <select name="category" className="input"><option value="tools">Tools & software</option><option value="ads">Ad spend</option><option value="equipment">Equipment</option><option value="travel">Travel</option><option value="office">Office</option><option value="other">Other</option></select></div>
-            <div><label className="label">Amount *</label><input name="amount" type="number" min="0.01" step="0.01" required className="input" /></div>
-            <div><label className="label">Currency</label><CurrencySelect /></div>
-            <div><label className="label">Date</label><input name="incurred_on" type="date" className="input" /></div>
-            <div className="sm:col-span-6"><button className="btn-primary">Add expense</button></div>
-          </form>
-        </div>
-        <div className="space-y-2">
-          {(expenses ?? []).length === 0 && <Empty>No expenses recorded yet.</Empty>}
-          {(expenses ?? []).slice(0, 30).map((e) => (
-            <div key={e.id} className="row"><div className="min-w-0"><p className="truncate font-medium">{e.title}</p><p className="font-mono text-[11px] uppercase text-mute">{e.category} · {fmtDate(e.incurred_on)}</p></div><span className="flex items-center gap-3"><span className="font-semibold">{money(e.amount, e.currency)}</span><form action={deleteExpenseAction}><input type="hidden" name="id" value={e.id} /><DeleteButton message="Delete this expense permanently?" /></form></span></div>
-          ))}
-        </div>
-      </section>
+      <Link href="/transactions" className="card flex items-center justify-between !p-4 hover:border-forest/40">
+        <span><span className="font-semibold">All transactions</span><span className="block text-sm text-mute">Invoices, expenses and team pay: search, edit, delete, export.</span></span>
+        <span className="text-forest">Open →</span>
+      </Link>
     </Shell>
   );
 }

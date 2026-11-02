@@ -32,3 +32,16 @@ h1, h2, h3 { letter-spacing: -0.025em; }
   main { padding: 0 !important; max-width: none !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ---- motion: quick, quiet, never in the way ---- */
+form[data-busy] button, form[data-busy] select, form[data-busy] input[type="submit"] { opacity: .55; pointer-events: none; }
+form[data-busy] button[type="submit"], form[data-busy] button:not([type]) { cursor: progress; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
+.toast-in { animation: toast-in .18s ease-out both; }
+@keyframes page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+main { animation: page-in .22s ease-out both; }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.skeleton { border-radius: 12px; background: linear-gradient(90deg, #ECEAE2 25%, #F6F5F0 37%, #ECEAE2 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+a, button, .card, .row { transition-property: color, background-color, border-color, box-shadow, transform, opacity; transition-duration: .15s; transition-timing-function: ease; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }

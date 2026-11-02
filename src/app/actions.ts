@@ -8,6 +8,20 @@ import { BASE_CURRENCY, CURRENCIES, currencyForCountry, isCurrency } from "@/lib
 import { addDays, isoDay, lateInterest, effectiveDueDate, percentsAddUp, splitAmounts } from "@/lib/payments";
 
 /* ------------------------------------------------------------------ guards */
+// Server-action errors thrown in production are masked by Next, so validation messages never reach the user.
+// Wrapped actions catch them and return { error } instead; <Form> shows it as a toast.
+function safe<A extends unknown[]>(fn: (...a: A) => Promise<void>) {
+  return async (...a: A): Promise<{ error?: string } | undefined> => {
+    try {
+      await fn(...a);
+    } catch (e) {
+      const d = (e as { digest?: unknown })?.digest;
+      if (typeof d === "string" && (d.startsWith("NEXT_REDIRECT") || d.startsWith("NEXT_HTTP_ERROR_FALLBACK"))) throw e;
+      return { error: e instanceof Error ? e.message : "Something went wrong" };
+    }
+  };
+}
+
 async function requireActive() {
   const me = await getMe();
   if (!me || me.status !== "active") throw new Error("Please sign in again");
@@ -43,7 +57,7 @@ async function logEvent(sb: Sb, actor: string, client_id: string, action: string
 }
 
 /* ------------------------------------------------------------------ clients */
-export async function createClientAction(form: FormData) {
+export const createClientAction = safe(async (form: FormData) => {
   const me = await requireLead();
   const sb = await supabaseServer();
   const business_name = str(form, "business_name");
@@ -67,9 +81,9 @@ export async function createClientAction(form: FormData) {
   await logEvent(sb, me.id, data.id, "client_created", "Welcome to Anweo", true);
   revalidatePath("/");
   redirect(`/clients/${data.id}`);
-}
+});
 
-export async function updateClientAction(form: FormData) {
+export const updateClientAction = safe(async (form: FormData) => {
   await requireLead();
   const sb = await supabaseServer();
   const id = str(form, "id");
@@ -92,20 +106,20 @@ export async function updateClientAction(form: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${id}`);
   revalidatePath("/");
-}
+});
 
-export async function setClientStatusAction(form: FormData) {
+export const setClientStatusAction = safe(async (form: FormData) => {
   await requireLead();
   const sb = await supabaseServer();
   const id = str(form, "id");
   const status = str(form, "status") === "archived" ? "archived" : "active";
-  await sb.from("clients").update({ status }).eq("id", id);
+  { const { error: e1 } = await sb.from("clients").update({ status }).eq("id", id); if (e1) throw new Error(e1.message); }
   revalidatePath(`/clients/${id}`);
   revalidatePath("/");
-}
+});
 
 /* ------------------------------------------------------------------ services on a client */
-export async function assignServiceAction(form: FormData) {
+export const assignServiceAction = safe(async (form: FormData) => {
   const me = await requireLead();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
@@ -140,19 +154,19 @@ export async function assignServiceAction(form: FormData) {
   const { data: svc } = await sb.from("services").select("name").eq("id", service_id).single();
   await logEvent(sb, me.id, client_id, "service_assigned", `Service added: ${svc?.name ?? ""}`, true);
   revalidatePath(`/clients/${client_id}`);
-}
+});
 
-export async function removeServiceAction(form: FormData) {
+export const removeServiceAction = safe(async (form: FormData) => {
   const me = await requireLead();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
-  await sb.from("client_services").update({ status: "cancelled" }).eq("id", str(form, "id"));
+  { const { error: e2 } = await sb.from("client_services").update({ status: "cancelled" }).eq("id", str(form, "id")); if (e2) throw new Error(e2.message); }
   await logEvent(sb, me.id, client_id, "service_cancelled", "A service was cancelled", false);
   revalidatePath(`/clients/${client_id}`);
-}
+});
 
 /* ------------------------------------------------------------------ catalogue */
-export async function createServiceAction(form: FormData) {
+export const createServiceAction = safe(async (form: FormData) => {
   await requireLead();
   const sb = await supabaseServer();
   const name = str(form, "name");
@@ -161,13 +175,13 @@ export async function createServiceAction(form: FormData) {
   const { error } = await sb.from("services").insert({ name, description: str(form, "description") || null, sort_order: (count ?? 0) + 1 });
   if (error) throw new Error(error.message.includes("duplicate") ? "A service with that name already exists" : error.message);
   revalidatePath("/catalogue");
-}
-export async function toggleServiceAction(form: FormData) {
+});
+export const toggleServiceAction = safe(async (form: FormData) => {
   await requireLead();
   const sb = await supabaseServer();
-  await sb.from("services").update({ active: str(form, "active") === "true" }).eq("id", str(form, "id"));
+  { const { error: e3 } = await sb.from("services").update({ active: str(form, "active") === "true" }).eq("id", str(form, "id")); if (e3) throw new Error(e3.message); }
   revalidatePath("/catalogue");
-}
+});
 // Extra prices typed as price_INR, price_USD ... (blank = none). The base currency has its own field.
 function extraPrices(form: FormData, baseCurrency: string): Record<string, number> {
   const out: Record<string, number> = {};
@@ -179,7 +193,7 @@ function extraPrices(form: FormData, baseCurrency: string): Record<string, numbe
   return out;
 }
 
-export async function createPackageAction(form: FormData) {
+export const createPackageAction = safe(async (form: FormData) => {
   await requireLead();
   const sb = await supabaseServer();
   const service_id = str(form, "service_id");
@@ -195,9 +209,9 @@ export async function createPackageAction(form: FormData) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/catalogue");
-}
+});
 
-export async function updatePackageAction(form: FormData) {
+export const updatePackageAction = safe(async (form: FormData) => {
   await requireLead();
   const sb = await supabaseServer();
   const id = str(form, "id");
@@ -212,16 +226,16 @@ export async function updatePackageAction(form: FormData) {
   }).eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/catalogue");
-}
-export async function togglePackageAction(form: FormData) {
+});
+export const togglePackageAction = safe(async (form: FormData) => {
   await requireLead();
   const sb = await supabaseServer();
-  await sb.from("packages").update({ active: str(form, "active") === "true" }).eq("id", str(form, "id"));
+  { const { error: e4 } = await sb.from("packages").update({ active: str(form, "active") === "true" }).eq("id", str(form, "id")); if (e4) throw new Error(e4.message); }
   revalidatePath("/catalogue");
-}
+});
 
 /* ------------------------------------------------------------------ work / tasks */
-export async function addWorkAction(form: FormData) {
+export const addWorkAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
@@ -239,9 +253,9 @@ export async function addWorkAction(form: FormData) {
   await logEvent(sb, me.id, client_id, "work_added", title, false);
   revalidatePath(`/clients/${client_id}`);
   revalidatePath("/tasks");
-}
+});
 
-export async function setWorkStatusAction(form: FormData) {
+export const setWorkStatusAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   const sb = await supabaseServer();
   const status = str(form, "status");
@@ -255,10 +269,10 @@ export async function setWorkStatusAction(form: FormData) {
   }
   revalidatePath(`/clients/${client_id || w?.client_id}`);
   revalidatePath("/tasks");
-}
+});
 
 /* ------------------------------------------------------------------ projects & milestones */
-export async function createProjectAction(form: FormData) {
+export const createProjectAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
@@ -276,9 +290,9 @@ export async function createProjectAction(form: FormData) {
   if (error) throw new Error(error.message);
   if (form.get("visible") === "on") await logEvent(sb, me.id, client_id, "project_created", `New project: ${title}`, true);
   revalidatePath(`/clients/${client_id}`);
-}
+});
 
-export async function setProjectStatusAction(form: FormData) {
+export const setProjectStatusAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   const sb = await supabaseServer();
   const status = str(form, "status");
@@ -288,9 +302,9 @@ export async function setProjectStatusAction(form: FormData) {
   if (p && status === "completed") await logEvent(sb, me.id, p.client_id, "project_completed", `Project completed: ${p.title}`, p.visible_to_client);
   revalidatePath(`/clients/${str(form, "client_id")}`);
   revalidatePath("/");
-}
+});
 
-export async function addMilestoneAction(form: FormData) {
+export const addMilestoneAction = safe(async (form: FormData) => {
   await requireStaff();
   const sb = await supabaseServer();
   const project_id = str(form, "project_id");
@@ -300,9 +314,9 @@ export async function addMilestoneAction(form: FormData) {
   const { error } = await sb.from("milestones").insert({ project_id, title, due_date: str(form, "due_date") || null, sort_order: (count ?? 0) + 1 });
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${str(form, "client_id")}`);
-}
+});
 
-export async function toggleMilestoneAction(form: FormData) {
+export const toggleMilestoneAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   const sb = await supabaseServer();
   const done = str(form, "done") === "true";
@@ -312,7 +326,7 @@ export async function toggleMilestoneAction(form: FormData) {
     if (p) await logEvent(sb, me.id, p.client_id, "milestone_done", `Milestone reached: ${m.title}`, p.visible_to_client);
   }
   revalidatePath(`/clients/${str(form, "client_id")}`);
-}
+});
 
 /* ------------------------------------------------------------------ documents & contracts */
 const DOC_KINDS = ["contract", "proposal", "brief", "asset", "report", "other"];
@@ -375,7 +389,7 @@ export async function registerDocumentAction(form: FormData): Promise<{ error?: 
   }
 }
 
-export async function setDocumentSharingAction(form: FormData) {
+export const setDocumentSharingAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   const sb = await supabaseServer();
   const id = str(form, "id");
@@ -389,9 +403,9 @@ export async function setDocumentSharingAction(form: FormData) {
   if (error) throw new Error(error.message);
   if (share) await logEvent(sb, me.id, client_id, "document_shared", `${d.kind === "contract" ? "Contract" : "Document"} shared: ${d.title}`, true);
   revalidatePath(`/clients/${client_id}`);
-}
+});
 
-export async function deleteDocumentAction(form: FormData) {
+export const deleteDocumentAction = safe(async (form: FormData) => {
   await requireStaff();
   const sb = await supabaseServer();
   const id = str(form, "id");
@@ -401,10 +415,10 @@ export async function deleteDocumentAction(form: FormData) {
   if (error) throw new Error(error.message);
   await supabaseAdmin().storage.from("documents").remove([d.storage_path]);
   revalidatePath(`/clients/${d.client_id}`);
-}
+});
 
 // A client accepts a contract. The database function checks everything again.
-export async function signDocumentAction(form: FormData) {
+export const signDocumentAction = safe(async (form: FormData) => {
   const me = await requireActive();
   if (me.role !== "client") throw new Error("Only the client can accept a contract");
   if (form.get("agree") !== "on") throw new Error("Please tick the box to confirm you agree");
@@ -412,7 +426,7 @@ export async function signDocumentAction(form: FormData) {
   const { error } = await sb.rpc("sign_document", { doc: str(form, "id"), signer: str(form, "signer") });
   if (error) throw new Error(error.message);
   revalidatePath("/");
-}
+});
 
 /* ------------------------------------------------------------------ chat */
 export async function sendMessageAction(form: FormData): Promise<{ error?: string }> {
@@ -434,7 +448,7 @@ export async function sendMessageAction(form: FormData): Promise<{ error?: strin
 }
 
 /* ------------------------------------------------------------------ social posts */
-export async function addPostAction(form: FormData) {
+export const addPostAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   if (!canSocial(me)) throw new Error("You don't have permission to create social posts");
   const sb = await supabaseServer();
@@ -453,11 +467,11 @@ export async function addPostAction(form: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${client_id}`);
   revalidatePath("/approvals");
-}
+});
 
 // Approve / reject: manager or admin only. Marking posted: anyone with social access.
 // The database enforces the same rules, so this can't be bypassed.
-export async function reviewPostAction(form: FormData) {
+export const reviewPostAction = safe(async (form: FormData) => {
   const me = await requireStaff();
   const sb = await supabaseServer();
   const decision = str(form, "decision"); // approve | reject | posted
@@ -480,10 +494,10 @@ export async function reviewPostAction(form: FormData) {
   }
   revalidatePath("/approvals");
   revalidatePath("/");
-}
+});
 
 /* ------------------------------------------------------------------ billing (admin only) */
-export async function addInvoiceAction(form: FormData) {
+export const addInvoiceAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
@@ -500,10 +514,10 @@ export async function addInvoiceAction(form: FormData) {
   if (error) throw new Error(error.message);
   if (!draft) await logEvent(sb, me.id, client_id, "invoice_issued", `Invoice issued: ${period}`, true);
   revalidatePath(`/clients/${client_id}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
-export async function markInvoicePaidAction(form: FormData) {
+export const markInvoicePaidAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const { data: inv } = await sb
@@ -512,12 +526,13 @@ export async function markInvoicePaidAction(form: FormData) {
     .eq("id", str(form, "id"))
     .select("period_label,client_id")
     .single();
+  if (!inv) throw new Error("That invoice could not be found");
   if (inv) await logEvent(sb, me.id, inv.client_id, "invoice_paid", `Payment received: ${inv.period_label}`, true);
   revalidatePath(`/clients/${inv?.client_id}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
-export async function sendDraftInvoiceAction(form: FormData) {
+export const sendDraftInvoiceAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const { data: draftInv } = await sb.from("invoices").select("client_id,clients(payment_terms_days)").eq("id", str(form, "id")).eq("status", "draft").single();
@@ -525,11 +540,11 @@ export async function sendDraftInvoiceAction(form: FormData) {
   const { data: inv } = await sb.from("invoices").update({ status: "due", issued_at: isoDay(), due_date: addDays(isoDay(), terms) }).eq("id", str(form, "id")).eq("status", "draft").select("period_label,client_id").single();
   if (inv) await logEvent(sb, me.id, inv.client_id, "invoice_issued", `Invoice issued: ${inv.period_label}`, true);
   revalidatePath(`/clients/${inv?.client_id}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
 /* ------------------------------------------------------------------ finance: expenses & payroll (admin only) */
-export async function addExpenseAction(form: FormData) {
+export const addExpenseAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const title = str(form, "title");
@@ -540,10 +555,10 @@ export async function addExpenseAction(form: FormData) {
     incurred_on: str(form, "incurred_on") || new Date().toISOString().slice(0, 10), created_by: me.id,
   });
   if (error) throw new Error(error.message);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
-export async function addPayRecordAction(form: FormData) {
+export const addPayRecordAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
   const staff_id = str(form, "staff_id");
@@ -559,20 +574,20 @@ export async function addPayRecordAction(form: FormData) {
     note: str(form, "note") || null,
   });
   if (error) throw new Error(error.message);
-  revalidatePath("/finance");
+  revalidatePath("/finance"); revalidatePath("/transactions");
   revalidatePath("/pay");
-}
+});
 
-export async function markPayPaidAction(form: FormData) {
+export const markPayPaidAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
-  await sb.from("pay_records").update({ status: "paid", paid_at: new Date().toISOString().slice(0, 10) }).eq("id", str(form, "id"));
-  revalidatePath("/finance");
+  { const { error: e5 } = await sb.from("pay_records").update({ status: "paid", paid_at: new Date().toISOString().slice(0, 10) }).eq("id", str(form, "id")); if (e5) throw new Error(e5.message); }
+  revalidatePath("/finance"); revalidatePath("/transactions");
   revalidatePath("/pay");
-}
+});
 
 /* ------------------------------------------------------------------ team & logins (admin only) */
-export async function createLoginAction(form: FormData) {
+export const createLoginAction = safe(async (form: FormData) => {
   await requireAdmin();
   const email = str(form, "email").toLowerCase();
   const password = str(form, "password");
@@ -602,9 +617,9 @@ export async function createLoginAction(form: FormData) {
     .eq("id", data.user.id);
   if (pErr) throw new Error(pErr.message);
   revalidatePath("/team");
-}
+});
 
-export async function updateMemberAction(form: FormData) {
+export const updateMemberAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const id = str(form, "id");
   const role = str(form, "role") as Role;
@@ -623,9 +638,9 @@ export async function updateMemberAction(form: FormData) {
     .neq("role", "client");
   if (error) throw new Error(error.message);
   revalidatePath("/team");
-}
+});
 
-export async function setAccountStatusAction(form: FormData) {
+export const setAccountStatusAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const id = str(form, "id");
   const status = str(form, "status");
@@ -633,7 +648,7 @@ export async function setAccountStatusAction(form: FormData) {
   if (!["active", "disabled"].includes(status)) return;
   await supabaseAdmin().from("profiles").update({ status }).eq("id", id);
   revalidatePath("/team");
-}
+});
 
 /* ------------------------------------------------------------------ payment terms & plans (admin only) */
 const intIn = (f: FormData, k: string, min: number, max: number, fallback: number) => {
@@ -644,7 +659,7 @@ const intIn = (f: FormData, k: string, min: number, max: number, fallback: numbe
   return v;
 };
 
-export async function savePaymentTermsAction(form: FormData) {
+export const savePaymentTermsAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
@@ -657,10 +672,10 @@ export async function savePaymentTermsAction(form: FormData) {
   }).eq("id", client_id);
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${client_id}`);
-}
+});
 
 // One-time payment, split into up to four instalments (for example 50% advance + 50% final).
-export async function createOneTimePlanAction(form: FormData) {
+export const createOneTimePlanAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
@@ -699,11 +714,11 @@ export async function createOneTimePlanAction(form: FormData) {
   await logEvent(sb, me.id, client_id, "plan_created", `Payment plan agreed: ${title}`, true);
   await sb.rpc("run_billing", { p_include_manual: false }); // issues anything already due, e.g. an advance due today
   revalidatePath(`/clients/${client_id}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
 // Repeating payment: monthly, quarterly or yearly.
-export async function createRecurringPlanAction(form: FormData) {
+export const createRecurringPlanAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
@@ -726,28 +741,28 @@ export async function createRecurringPlanAction(form: FormData) {
   await logEvent(sb, me.id, client_id, "plan_created", `Recurring payment agreed: ${title}`, true);
   await sb.rpc("run_billing", { p_include_manual: false });
   revalidatePath(`/clients/${client_id}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
-export async function invoiceInstallmentAction(form: FormData) {
+export const invoiceInstallmentAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
   const { error } = await sb.rpc("invoice_installment", { p_inst: str(form, "id") });
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${str(form, "client_id")}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
-export async function invoiceRecurringNowAction(form: FormData) {
+export const invoiceRecurringNowAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
   const { error } = await sb.rpc("invoice_recurring_now", { p_plan: str(form, "id") });
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${str(form, "client_id")}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
-export async function setPlanStatusAction(form: FormData) {
+export const setPlanStatusAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const status = str(form, "status");
@@ -756,21 +771,21 @@ export async function setPlanStatusAction(form: FormData) {
   const { data: plan } = await sb.from("payment_plans").update({ status }).eq("id", str(form, "id")).select("title").single();
   if (plan && status === "cancelled") await logEvent(sb, me.id, client_id, "plan_cancelled", `Payment plan ended: ${plan.title}`, true);
   revalidatePath(`/clients/${client_id}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
 // "Create all invoices that are ready" (includes recurring plans that aren't set to run by themselves).
-export async function runBillingAction() {
+export const runBillingAction = safe(async () => {
   await requireAdmin();
   const sb = await supabaseServer();
   const { error } = await sb.rpc("run_billing", { p_include_manual: true });
   if (error) throw new Error(error.message);
-  revalidatePath("/finance");
+  revalidatePath("/finance"); revalidatePath("/transactions");
   revalidatePath("/");
-}
+});
 
 // Charge the late interest that has built up on an overdue invoice, as its own invoice.
-export async function chargeLateInterestAction(form: FormData) {
+export const chargeLateInterestAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const id = str(form, "id");
@@ -795,14 +810,14 @@ export async function chargeLateInterestAction(form: FormData) {
     status: "due", issued_at: isoDay(), due_date: addDays(isoDay(), c.payment_terms_days),
   });
   if (error) throw new Error(error.message);
-  await sb.from("invoices").update({ late_fee_charged: Math.round((Number(inv.late_fee_charged) + amount) * 100) / 100 }).eq("id", id);
+  { const { error: e6 } = await sb.from("invoices").update({ late_fee_charged: Math.round((Number(inv.late_fee_charged) + amount) * 100) / 100 }).eq("id", id); if (e6) throw new Error(e6.message); }
   await logEvent(sb, me.id, inv.client_id, "late_interest", `Late payment interest charged on: ${inv.period_label}`, true);
   revalidatePath(`/clients/${inv.client_id}`);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
 /* ------------------------------------------------------------------ account */
-export async function updateOwnProfileAction(form: FormData) {
+export const updateOwnProfileAction = safe(async (form: FormData) => {
   const me = await requireActive();
   const sb = await supabaseServer();
   const full_name = str(form, "full_name");
@@ -810,7 +825,7 @@ export async function updateOwnProfileAction(form: FormData) {
   const { error } = await sb.from("profiles").update({ full_name, phone: str(form, "phone") || null }).eq("id", me.id);
   if (error) throw new Error(error.message);
   revalidatePath("/account");
-}
+});
 
 export async function signOutAction() {
   await (await supabaseServer()).auth.signOut();
@@ -819,7 +834,7 @@ export async function signOutAction() {
 
 
 /* ----------------------------------------------------------- company settings */
-export async function saveCompanySettingsAction(form: FormData) {
+export const saveCompanySettingsAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
   const legal_name = str(form, "legal_name");
@@ -838,10 +853,10 @@ export async function saveCompanySettingsAction(form: FormData) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/settings");
-}
+});
 
 /* ---------------------------------------------------- deleting transactions (admin only) */
-export async function deleteInvoiceAction(form: FormData) {
+export const deleteInvoiceAction = safe(async (form: FormData) => {
   const me = await requireAdmin();
   const sb = await supabaseServer();
   const id = str(form, "id");
@@ -849,23 +864,84 @@ export async function deleteInvoiceAction(form: FormData) {
   if (error || !inv) throw new Error(error?.message ?? "Could not delete that invoice");
   await logEvent(sb, me.id, inv.client_id, "invoice_deleted", `Deleted invoice: ${inv.period_label} (${inv.amount} ${inv.currency}, ${inv.status})`, false);
   revalidatePath(`/clients/${inv.client_id}`);
-  revalidatePath("/finance");
+  revalidatePath("/finance"); revalidatePath("/transactions");
   revalidatePath("/");
-}
+});
 
-export async function deleteExpenseAction(form: FormData) {
+export const deleteExpenseAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
   const { error } = await sb.from("expenses").delete().eq("id", str(form, "id"));
   if (error) throw new Error(error.message);
-  revalidatePath("/finance");
-}
+  revalidatePath("/finance"); revalidatePath("/transactions");
+});
 
-export async function deletePayRecordAction(form: FormData) {
+export const deletePayRecordAction = safe(async (form: FormData) => {
   await requireAdmin();
   const sb = await supabaseServer();
   const { error } = await sb.from("pay_records").delete().eq("id", str(form, "id"));
   if (error) throw new Error(error.message);
-  revalidatePath("/finance");
+  revalidatePath("/finance"); revalidatePath("/transactions");
   revalidatePath("/pay");
-}
+});
+
+/* ------------------------------------------------ editing transactions (admin only) */
+const isoOrNull = (f: FormData, k: string) => (/^\d{4}-\d{2}-\d{2}$/.test(str(f, k)) ? str(f, k) : null);
+const backTo = (f: FormData) => {
+  const b = str(f, "back");
+  return b.startsWith("/transactions") ? b : "/transactions";
+};
+
+export const updateInvoiceAction = safe(async (form: FormData) => {
+  const me = await requireAdmin();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const amount = num(form, "amount");
+  const status = str(form, "status");
+  if (!(amount >= 0)) throw new Error("Enter a valid amount");
+  if (!["draft", "due", "overdue", "paid", "void"].includes(status)) throw new Error("Pick a status");
+  const period_label = str(form, "period_label");
+  if (!period_label) throw new Error("Enter a description");
+  const paid_at = status === "paid" ? isoOrNull(form, "paid_at") ?? isoDay() : null;
+  const { data: inv, error } = await sb.from("invoices").update({
+    period_label, amount, currency: cur(form, "currency"), status, paid_at,
+    issued_at: isoOrNull(form, "issued_at") ?? isoDay(), due_date: isoOrNull(form, "due_date"),
+  }).eq("id", id).select("client_id").single();
+  if (error || !inv) throw new Error(error?.message ?? "Could not save that invoice");
+  await logEvent(sb, me.id, inv.client_id, "invoice_edited", `Edited invoice: ${period_label}`, false);
+  revalidatePath("/transactions"); revalidatePath("/finance"); revalidatePath("/transactions"); revalidatePath(`/clients/${inv.client_id}`); revalidatePath("/");
+  redirect(backTo(form));
+});
+
+export const updateExpenseAction = safe(async (form: FormData) => {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const title = str(form, "title");
+  const amount = num(form, "amount");
+  if (!title || !(amount >= 0)) throw new Error("Enter what it was for and an amount");
+  const { error } = await sb.from("expenses").update({
+    title, amount, currency: cur(form, "currency"), category: str(form, "category") || "other",
+    incurred_on: isoOrNull(form, "incurred_on") ?? isoDay(), note: str(form, "note") || null,
+  }).eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/transactions"); revalidatePath("/finance"); revalidatePath("/transactions");
+  redirect(backTo(form));
+});
+
+export const updatePayRecordAction = safe(async (form: FormData) => {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const amount = num(form, "amount");
+  const status = str(form, "status");
+  if (!(amount >= 0)) throw new Error("Enter a valid amount");
+  if (!["pending", "paid"].includes(status)) throw new Error("Pick a status");
+  const { error } = await sb.from("pay_records").update({
+    amount, currency: cur(form, "currency"), status,
+    period_label: str(form, "period_label") || "Pay",
+    kind: ["salary", "commission", "bonus", "reimbursement"].includes(str(form, "kind")) ? str(form, "kind") : "salary",
+    paid_at: status === "paid" ? isoOrNull(form, "paid_at") ?? isoDay() : null, note: str(form, "note") || null,
+  }).eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/transactions"); revalidatePath("/finance"); revalidatePath("/transactions"); revalidatePath("/pay");
+  redirect(backTo(form));
+});

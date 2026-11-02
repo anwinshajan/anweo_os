@@ -1,4 +1,5 @@
 import { Empty, Totals, fmtDate, money, statusPill, totals } from "@/components/Shell";
+import Form from "@/components/Form";
 import DeleteButton from "@/components/DeleteButton";
 import CurrencySelect from "@/components/CurrencySelect";
 import {
@@ -45,7 +46,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
       {/* ---------------- Payment terms ---------------- */}
       <section className="card">
         <p className="tag mb-3">[ Payment terms for this client ]</p>
-        <form action={savePaymentTermsAction} className="grid gap-3 sm:grid-cols-4">
+        <Form action={savePaymentTermsAction} className="grid gap-3 sm:grid-cols-4">
           <input type="hidden" name="client_id" value={id} />
           <div><label className="label">Pay within (days)</label><input name="payment_terms_days" type="number" min="0" max="180" step="1" defaultValue={client.payment_terms_days} className="input" /></div>
           <div><label className="label">Grace period (days)</label><input name="late_grace_days" type="number" min="0" max="90" step="1" defaultValue={client.late_grace_days} className="input" /></div>
@@ -57,7 +58,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
               : "Late interest is off for this client. Set a rate above to turn it on."}{" "}
             The client can see these terms. Make sure they match what you agreed in the contract.
           </p>
-        </form>
+        </Form>
       </section>
 
       {/* ---------------- Payment plans ---------------- */}
@@ -100,7 +101,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
                             <span className="font-semibold">{money(x.amount, p.currency)}</span>
                             <span className={`pill ${statusPill(label === "invoiced" ? "due" : label === "not invoiced" ? "planning" : label)}`}>{label}</span>
                             {!inv && p.status === "active" && (
-                              <form action={invoiceInstallmentAction}><input type="hidden" name="id" value={x.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-forest hover:underline">Invoice now</button></form>
+                              <Form action={invoiceInstallmentAction}><input type="hidden" name="id" value={x.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-forest hover:underline">Invoice now</button></Form>
                             )}
                           </span>
                         </div>
@@ -120,13 +121,13 @@ export default async function BillingTab({ id, client }: { id: string; client: C
                 {p.status !== "cancelled" && !allPaid && p.status !== "completed" && (
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     {p.kind === "recurring" && p.status === "active" && (
-                      <form action={invoiceRecurringNowAction}><input type="hidden" name="id" value={p.id} /><input type="hidden" name="client_id" value={id} /><button className="btn-ghost !px-3 !py-1.5 text-xs">Create next invoice now</button></form>
+                      <Form action={invoiceRecurringNowAction}><input type="hidden" name="id" value={p.id} /><input type="hidden" name="client_id" value={id} /><button className="btn-ghost !px-3 !py-1.5 text-xs">Create next invoice now</button></Form>
                     )}
-                    <form action={setPlanStatusAction} className="flex items-center gap-3">
+                    <Form action={setPlanStatusAction} className="flex items-center gap-3">
                       <input type="hidden" name="id" value={p.id} /><input type="hidden" name="client_id" value={id} />
                       {p.status === "active" ? <button name="status" value="paused" className="text-xs font-medium text-mute hover:text-ink hover:underline">Pause</button> : <button name="status" value="active" className="text-xs font-medium text-forest hover:underline">Resume</button>}
                       <button name="status" value="cancelled" className="text-xs font-medium text-red-700 hover:underline">End this plan</button>
-                    </form>
+                    </Form>
                   </div>
                 )}
               </div>
@@ -136,7 +137,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
 
         <details className="mt-5 border-t border-edge pt-4">
           <summary className="cursor-pointer text-sm font-semibold text-forest">+ One-time payment (advance + final, or other split)</summary>
-          <form action={createOneTimePlanAction} className="mt-4 grid gap-3 sm:grid-cols-4">
+          <Form action={createOneTimePlanAction} className="mt-4 grid gap-3 sm:grid-cols-4">
             <input type="hidden" name="client_id" value={id} />
             <div className="sm:col-span-2"><label className="label">What is it for? *</label><input name="title" required placeholder="e.g. Website build" className="input" /></div>
             <div><label className="label">Total amount *</label><input name="total" type="number" min="0.01" step="0.01" required className="input" /></div>
@@ -158,12 +159,12 @@ export default async function BillingTab({ id, client }: { id: string; client: C
             </div>
             <div className="sm:col-span-4"><label className="label">Notes (internal)</label><input name="notes" className="input" /></div>
             <div className="sm:col-span-4"><button className="btn-primary">Create payment plan</button></div>
-          </form>
+          </Form>
         </details>
 
         <details className="mt-3 border-t border-edge pt-4">
           <summary className="cursor-pointer text-sm font-semibold text-forest">+ Recurring payment (monthly, quarterly or yearly)</summary>
-          <form action={createRecurringPlanAction} className="mt-4 grid gap-3 sm:grid-cols-4">
+          <Form action={createRecurringPlanAction} className="mt-4 grid gap-3 sm:grid-cols-4">
             <input type="hidden" name="client_id" value={id} />
             <div className="sm:col-span-2"><label className="label">What is it for? *</label><input name="title" required placeholder="e.g. Social media retainer" className="input" /></div>
             <div><label className="label">Amount each time *</label><input name="amount" type="number" min="0.01" step="0.01" required className="input" /></div>
@@ -176,7 +177,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
             <div className="sm:col-span-4"><label className="label">Notes (internal)</label><input name="notes" className="input" /></div>
             <p className="text-xs text-mute sm:col-span-4">With automatic invoicing on, each invoice is created and shown to the client on its date. With it off, it appears under Finance → “Ready to invoice” for you to create.</p>
             <div className="sm:col-span-4"><button className="btn-primary">Create recurring payment</button></div>
-          </form>
+          </Form>
         </details>
       </section>
 
@@ -209,18 +210,18 @@ export default async function BillingTab({ id, client }: { id: string; client: C
                   <span className="font-semibold">{money(i.amount, i.currency)}</span>
                   <span className={`pill ${statusPill(late ? "overdue" : i.status)}`}>{late ? "overdue" : i.status}</span>
                   <a href={`/invoices/${i.id}`} className="text-xs font-medium text-forest hover:underline">Invoice</a>
-                  <form action={deleteInvoiceAction}><input type="hidden" name="id" value={i.id} /><DeleteButton message="Delete this invoice permanently? If it came from a payment plan, that payment becomes un-invoiced and may be invoiced again. To keep a record without billing, mark it paid instead." /></form>
-                  {i.status === "draft" && <form action={sendDraftInvoiceAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-forest hover:underline">Send to client</button></form>}
-                  {unpaid && <form action={markInvoicePaidAction}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></form>}
+                  <Form action={deleteInvoiceAction}><input type="hidden" name="id" value={i.id} /><DeleteButton message="Delete this invoice permanently? If it came from a payment plan, that payment becomes un-invoiced and may be invoiced again. To keep a record without billing, mark it paid instead." /></Form>
+                  {i.status === "draft" && <Form action={sendDraftInvoiceAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-forest hover:underline">Send to client</button></Form>}
+                  {unpaid && <Form action={markInvoicePaidAction}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></Form>}
                   {late && unbilled >= 0.01 && (
-                    <form action={chargeLateInterestAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-amber-800 hover:underline">Charge {money(unbilled, i.currency)} interest</button></form>
+                    <Form action={chargeLateInterestAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-amber-800 hover:underline">Charge {money(unbilled, i.currency)} interest</button></Form>
                   )}
                 </span>
               </div>
             );
           })}
         </div>
-        <form action={addInvoiceAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-5">
+        <Form action={addInvoiceAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-5">
           <input type="hidden" name="client_id" value={id} />
           <div><label className="label">Describe it</label><input name="period_label" placeholder="e.g. Logo design" className="input" /></div>
           <div><label className="label">Amount</label><input name="amount" type="number" min="1" step="0.01" required className="input" /></div>
@@ -229,7 +230,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
           <div className="flex items-end"><button className="btn-primary w-full">Add invoice</button></div>
           <label className="flex items-center gap-2 text-sm sm:col-span-5"><input type="checkbox" name="draft" className="h-4 w-4 accent-forest" /> Save as draft (the client won't see it yet)</label>
           <p className="text-xs text-mute sm:col-span-5">A single invoice outside any plan. Leave the due date blank to use this client's {terms}-day terms.</p>
-        </form>
+        </Form>
       </section>
     </>
   );

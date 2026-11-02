@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Form from "@/components/Form";
 import { notFound, redirect } from "next/navigation";
 import Shell, { Empty, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import UploadForm from "@/components/UploadForm";
@@ -99,14 +100,14 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
                 <span className="font-semibold">{money(s.price_monthly, s.currency)}</span>
                 <span className={`pill ${statusPill(s.status)}`}>{s.status}</span>
                 {s.status === "active" && (
-                  <form action={removeServiceAction}><input type="hidden" name="id" value={s.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-red-700 hover:underline">Cancel</button></form>
+                  <Form action={removeServiceAction}><input type="hidden" name="id" value={s.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-red-700 hover:underline">Cancel</button></Form>
                 )}
               </span>
             </div>
           ))}
         </div>
         {lead && (
-          <form action={assignServiceAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
+          <Form action={assignServiceAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
             <input type="hidden" name="client_id" value={id} />
             <div className="sm:col-span-4">
               <label className="label">Service and package</label>
@@ -126,14 +127,14 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
             <div><label className="label">Currency</label><CurrencySelect defaultValue={client.currency} /></div>
             <div className="flex items-end"><button className="btn-primary w-full">Add service</button></div>
             <p className="text-xs text-mute sm:col-span-4">Choosing “Custom price” needs a price above. Manage packages under Services.</p>
-          </form>
+          </Form>
         )}
       </section>
 
       {lead && (
         <section className="card">
           <p className="tag mb-3">[ Client details ]</p>
-          <form action={updateClientAction} className="grid gap-3 sm:grid-cols-2">
+          <Form action={updateClientAction} className="grid gap-3 sm:grid-cols-2">
             <input type="hidden" name="id" value={id} />
             <div><label className="label">Business name *</label><input name="business_name" required defaultValue={client.business_name} className="input" /></div>
             <div><label className="label">Contact person</label><input name="contact_name" defaultValue={client.contact_name ?? ""} className="input" /></div>
@@ -145,11 +146,11 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
             <div className="sm:col-span-2"><label className="label">Internal notes</label><textarea name="notes" rows={3} defaultValue={client.notes ?? ""} className="input" /></div>
             <p className="text-xs text-mute sm:col-span-2">Changing the billing currency only affects new invoices and services. Existing ones keep the currency they were created in.</p>
             <div className="sm:col-span-2"><button className="btn-primary">Save details</button></div>
-          </form>
-          <form action={setClientStatusAction} className="mt-4 border-t border-edge pt-4">
+          </Form>
+          <Form action={setClientStatusAction} className="mt-4 border-t border-edge pt-4">
             <input type="hidden" name="id" value={id} />
             <button name="status" value={client.status === "archived" ? "active" : "archived"} className="btn-ghost text-xs">{client.status === "archived" ? "Restore this client" : "Archive this client"}</button>
-          </form>
+          </Form>
         </section>
       )}
     </>
@@ -175,11 +176,11 @@ async function Projects({ id }: { id: string }) {
                   <h2 className="text-xl font-bold tracking-tight">{p.title}{!p.visible_to_client && <span className="ml-2 font-mono text-[10px] uppercase text-mute">internal</span>}</h2>
                   <p className="font-mono text-[11px] text-mute">{[p.start_date && `Start ${fmtDate(p.start_date)}`, p.due_date && `Due ${fmtDate(p.due_date)}`].filter(Boolean).join(" · ")}</p>
                 </div>
-                <form action={setProjectStatusAction} className="flex items-center gap-2">
+                <Form action={setProjectStatusAction} className="flex items-center gap-2">
                   <input type="hidden" name="id" value={p.id} /><input type="hidden" name="client_id" value={id} />
                   <select key={p.status} name="status" defaultValue={p.status} className="input !w-auto !py-1.5 !text-xs">{["planning", "in_progress", "review", "completed", "on_hold"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
                   <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
-                </form>
+                </Form>
               </div>
               {p.description && <p className="mt-2 text-sm text-ink/70">{p.description}</p>}
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-forest-soft"><div className="h-full rounded-full bg-lime-deep" style={{ width: `${pct}%` }} /></div>
@@ -187,28 +188,28 @@ async function Projects({ id }: { id: string }) {
               <ul className="mt-3 space-y-1.5">
                 {ms.map((m: any) => (
                   <li key={m.id}>
-                    <form action={toggleMilestoneAction} className="flex items-center gap-2.5 text-sm">
+                    <Form action={toggleMilestoneAction} className="flex items-center gap-2.5 text-sm">
                       <input type="hidden" name="id" value={m.id} /><input type="hidden" name="client_id" value={id} />
                       <button name="done" value={m.done ? "false" : "true"} aria-label={m.done ? "Mark not done" : "Mark done"} className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${m.done ? "bg-forest text-lime" : "border border-edge bg-white hover:border-forest"}`}>{m.done ? "✓" : ""}</button>
                       <span className={m.done ? "text-mute line-through" : ""}>{m.title}</span>
                       {m.due_date && <span className="font-mono text-[10px] text-mute">{fmtDate(m.due_date)}</span>}
-                    </form>
+                    </Form>
                   </li>
                 ))}
               </ul>
-              <form action={addMilestoneAction} className="mt-4 grid gap-2 border-t border-edge pt-4 sm:grid-cols-[1fr_auto_auto]">
+              <Form action={addMilestoneAction} className="mt-4 grid gap-2 border-t border-edge pt-4 sm:grid-cols-[1fr_auto_auto]">
                 <input type="hidden" name="project_id" value={p.id} /><input type="hidden" name="client_id" value={id} />
                 <input name="title" required placeholder="Add a milestone" className="input" aria-label="Milestone" />
                 <input name="due_date" type="date" className="input" aria-label="Due date" />
                 <button className="btn-ghost">Add</button>
-              </form>
+              </Form>
             </section>
           );
         })}
       </div>
       <section className="card">
         <p className="tag mb-3">[ New project ]</p>
-        <form action={createProjectAction} className="grid gap-3 sm:grid-cols-4">
+        <Form action={createProjectAction} className="grid gap-3 sm:grid-cols-4">
           <input type="hidden" name="client_id" value={id} />
           <div className="sm:col-span-2"><label className="label">Title *</label><input name="title" required className="input" placeholder="e.g. Website redesign" /></div>
           <div><label className="label">Start</label><input name="start_date" type="date" className="input" /></div>
@@ -216,7 +217,7 @@ async function Projects({ id }: { id: string }) {
           <div className="sm:col-span-4"><label className="label">What's included</label><textarea name="description" rows={2} className="input" /></div>
           <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" name="visible" defaultChecked className="h-4 w-4 accent-forest" /> Show to the client</label>
           <div><button className="btn-primary w-full">Create project</button></div>
-        </form>
+        </Form>
       </section>
     </>
   );
@@ -247,11 +248,11 @@ async function Documents({ id, lead }: { id: string; lead: boolean }) {
               <a href={`/api/documents/${d.id}`} target="_blank" rel="noreferrer" className="btn-ghost !px-3 !py-1.5 text-xs">Open</a>
               {d.status !== "signed" && (d.kind !== "contract" || lead) && (
                 <>
-                  <form action={setDocumentSharingAction}>
+                  <Form action={setDocumentSharingAction}>
                     <input type="hidden" name="id" value={d.id} /><input type="hidden" name="client_id" value={id} />
                     <button name="share" value={d.visible_to_client ? "false" : "true"} className="text-xs font-medium text-forest hover:underline">{d.visible_to_client ? "Unshare" : "Share with client"}</button>
-                  </form>
-                  <form action={deleteDocumentAction}><input type="hidden" name="id" value={d.id} /><button className="text-xs font-medium text-red-700 hover:underline">Delete</button></form>
+                  </Form>
+                  <Form action={deleteDocumentAction}><input type="hidden" name="id" value={d.id} /><button className="text-xs font-medium text-red-700 hover:underline">Delete</button></Form>
                 </>
               )}
             </span>
@@ -280,7 +281,7 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
         <div className="space-y-2">
           {(work ?? []).length === 0 && <Empty>No work items yet.</Empty>}
           {(work ?? []).map((w: any) => (
-            <form key={w.id} action={setWorkStatusAction} className="row flex-wrap">
+            <Form key={w.id} action={setWorkStatusAction} className="row flex-wrap">
               <input type="hidden" name="id" value={w.id} /><input type="hidden" name="client_id" value={id} />
               <div className="min-w-0"><p className="truncate">{w.title}{!w.visible_to_client && <span className="ml-2 font-mono text-[10px] uppercase text-mute">internal</span>}</p>
                 <p className="font-mono text-[11px] text-mute">{w.assignee ? `→ ${who.get(w.assignee) ?? "someone"}` : "Unassigned"}{w.due_date ? ` · due ${fmtDate(w.due_date)}` : ""}</p></div>
@@ -288,10 +289,10 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
                 <select key={w.status} name="status" defaultValue={w.status} className="input !w-auto !py-1.5 !text-xs">{["todo", "in_progress", "review", "done"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
                 <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
               </span>
-            </form>
+            </Form>
           ))}
         </div>
-        <form action={addWorkAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
+        <Form action={addWorkAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
           <input type="hidden" name="client_id" value={id} />
           <div className="sm:col-span-2"><label className="label">New task</label><input name="title" required className="input" /></div>
           <div><label className="label">Assign to</label>
@@ -299,7 +300,7 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
           <div><label className="label">Due</label><input name="due_date" type="date" className="input" /></div>
           <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" name="visible" defaultChecked className="h-4 w-4 accent-forest" /> Show to client</label>
           <div><button className="btn-primary w-full">Add task</button></div>
-        </form>
+        </Form>
       </section>
 
       <section className="card">
@@ -315,14 +316,14 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
           ))}
         </div>
         {meCanSocial ? (
-          <form action={addPostAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
+          <Form action={addPostAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
             <input type="hidden" name="client_id" value={id} />
             <div><label className="label">Type</label><select name="kind" className="input"><option value="post">Post</option><option value="reel">Reel</option><option value="story">Story</option><option value="carousel">Carousel</option></select></div>
             <div><label className="label">Platform</label><select name="platform" className="input"><option>instagram</option><option>facebook</option><option>tiktok</option><option>linkedin</option></select></div>
             <div className="sm:col-span-2"><label className="label">Publish at</label><input name="scheduled_at" type="datetime-local" className="input" /></div>
             <div className="sm:col-span-4"><label className="label">Caption / script</label><textarea name="caption" rows={3} className="input" /></div>
             <div className="sm:col-span-4"><button className="btn-primary">Send for approval</button></div>
-          </form>
+          </Form>
         ) : <p className="mt-4 text-xs text-mute">Only social media managers, managers and admins can create posts.</p>}
       </section>
     </>

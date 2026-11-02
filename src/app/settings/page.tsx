@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Form from "@/components/Form";
 import Shell, { PageHead } from "@/components/Shell";
 import { saveCompanySettingsAction } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
@@ -15,7 +16,7 @@ export default async function Settings() {
   return (
     <Shell me={me}>
       <PageHead tag="Admin" title="Company settings" sub="Printed on every invoice." />
-      <form action={saveCompanySettingsAction} className="card grid gap-3 sm:grid-cols-2">
+      <Form action={saveCompanySettingsAction} className="card grid gap-3 sm:grid-cols-2">
         <div><label className="label">Business name *</label><input name="legal_name" required defaultValue={f("legal_name") || "Anweo"} className="input" /></div>
         <div><label className="label">Website</label><input name="website" defaultValue={f("website")} className="input" /></div>
         <div><label className="label">Email</label><input name="email" type="email" defaultValue={f("email")} className="input" /></div>
@@ -27,7 +28,7 @@ export default async function Settings() {
         <div className="sm:col-span-2"><label className="label">Note at the bottom</label><input name="invoice_note" defaultValue={f("invoice_note")} placeholder="Thank you for your business." className="input" /></div>
         <p className="text-xs text-mute sm:col-span-2">Invoices show your tax number but do not calculate VAT/GST. Add it into the amount if it applies.</p>
         <div className="sm:col-span-2"><button className="btn-primary">Save settings</button></div>
-      </form>
+      </Form>
     </Shell>
   );
 }

@@ -25,6 +25,7 @@ export function navFor(me: Me): NavItem[] {
     { href: "/approvals", label: "Approvals", icon: "approvals" },
     ...(lead ? [{ href: "/catalogue", label: "Services", icon: "catalogue" } as NavItem] : []),
     ...(admin ? [{ href: "/finance", label: "Finance", icon: "finance" } as NavItem] : []),
+    ...(admin ? [{ href: "/transactions", label: "Transactions", icon: "transactions" } as NavItem] : []),
     ...(admin ? [{ href: "/team", label: "Team", icon: "team" } as NavItem] : []),
     ...(admin ? [{ href: "/settings", label: "Settings", icon: "settings", more: true } as NavItem] : []),
     ...(!admin ? [{ href: "/pay", label: "My pay", icon: "pay" } as NavItem] : []),
