@@ -248,7 +248,8 @@ export async function setWorkStatusAction(form: FormData) {
   const id = str(form, "id");
   const client_id = str(form, "client_id");
   if (!["todo", "in_progress", "review", "done"].includes(status)) return;
-  const { data: w } = await sb.from("work_items").update({ status }).eq("id", id).select("title,visible_to_client,client_id").single();
+  const { data: w, error } = await sb.from("work_items").update({ status }).eq("id", id).select("title,visible_to_client,client_id").single();
+  if (error || !w) throw new Error(error?.message ?? "Could not change the task status");
   if (w && status === "done") {
     await logEvent(sb, me.id, w.client_id, "work_done", `Completed: ${w.title}`, w.visible_to_client);
   }
@@ -282,9 +283,11 @@ export async function setProjectStatusAction(form: FormData) {
   const sb = await supabaseServer();
   const status = str(form, "status");
   if (!["planning", "in_progress", "review", "completed", "on_hold"].includes(status)) return;
-  const { data: p } = await sb.from("projects").update({ status }).eq("id", str(form, "id")).select("client_id,title,visible_to_client").single();
+  const { data: p, error } = await sb.from("projects").update({ status }).eq("id", str(form, "id")).select("client_id,title,visible_to_client").single();
+  if (error || !p) throw new Error(error?.message ?? "Could not change the project status");
   if (p && status === "completed") await logEvent(sb, me.id, p.client_id, "project_completed", `Project completed: ${p.title}`, p.visible_to_client);
   revalidatePath(`/clients/${str(form, "client_id")}`);
+  revalidatePath("/");
 }
 
 export async function addMilestoneAction(form: FormData) {

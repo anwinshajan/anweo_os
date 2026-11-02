@@ -31,7 +31,7 @@ export default async function Tasks() {
         <p className="font-mono text-[11px] text-mute"><Link href={`/clients/${t.client_id}?tab=work`} className="hover:text-forest hover:underline">{t.clients?.business_name}</Link>{t.due_date ? ` · due ${fmtDate(t.due_date)}` : ""}</p>
       </div>
       <span className="flex shrink-0 items-center gap-2">
-        <select name="status" defaultValue={t.status} className="input !w-auto !py-1.5 !text-xs">{["todo", "in_progress", "review", "done"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
+        <select key={t.status} name="status" defaultValue={t.status} className="input !w-auto !py-1.5 !text-xs">{["todo", "in_progress", "review", "done"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
         <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
       </span>
     </form>
