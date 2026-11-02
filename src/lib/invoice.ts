@@ -34,5 +34,5 @@ export const fileNameFor = (doc: InvoiceDoc) => `Anweo-Invoice-${doc.number}.pdf
 // The standard-terms sentence printed on the invoice.
 export function termsSentence(termsDays: number, lateRate: number, graceDays: number): string {
   const base = `Payment is due within ${termsDays} day${termsDays === 1 ? "" : "s"} of the invoice date.`;
-  return lateRate > 0 ? `${base} Late payments may be charged interest at ${lateRate}% per month after a ${graceDays}-day grace period.` : base;
+  return lateRate > 0 ? `${base} A late fee of ${lateRate}% of the unpaid amount is added for each full week a payment is overdue, after a ${graceDays}-day grace period.` : base;
 }

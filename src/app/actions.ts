@@ -649,7 +649,7 @@ export async function savePaymentTermsAction(form: FormData) {
   const sb = await supabaseServer();
   const client_id = str(form, "client_id");
   const pct = str(form, "late_interest_percent") === "" ? 0 : Number(str(form, "late_interest_percent"));
-  if (!(pct >= 0 && pct <= 50)) throw new Error("Late interest must be between 0 and 50 percent a month");
+  if (!(pct >= 0 && pct <= 50)) throw new Error("Late fee must be between 0 and 50 percent a week");
   const { error } = await sb.from("clients").update({
     payment_terms_days: intIn(form, "payment_terms_days", 0, 180, 7),
     late_grace_days: intIn(form, "late_grace_days", 0, 90, 0),
@@ -782,7 +782,7 @@ export async function chargeLateInterestAction(form: FormData) {
   const c = inv.clients as unknown as { payment_terms_days: number; late_grace_days: number; late_interest_percent: number };
   const accrued = lateInterest({
     amount: Number(inv.amount), due: effectiveDueDate(inv, c.payment_terms_days), today: isoDay(),
-    graceDays: c.late_grace_days, percentPerMonth: Number(c.late_interest_percent),
+    graceDays: c.late_grace_days, percentPerWeek: Number(c.late_interest_percent),
   });
   const unbilled = Math.round((accrued - Number(inv.late_fee_charged)) * 100) / 100;
   if (!(unbilled >= 0.01)) throw new Error("There's no new late interest to charge on this invoice");

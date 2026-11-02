@@ -48,7 +48,7 @@ async function buildContext(sb: Sb, me: Me): Promise<string> {
     out.push("Work: " + ((work ?? []).map((w) => `${w.title} [${w.status}]`).join("; ") || "none"));
     out.push("Upcoming content: " + ((posts ?? []).map((p) => `${p.kind} on ${p.platform} [${p.status}${p.scheduled_at ? ", " + p.scheduled_at.slice(0, 10) : ""}]`).join("; ") || "none"));
     out.push("Invoices: " + ((invoices ?? []).map((i) => `${i.period_label} ${i.currency} ${i.amount} [${i.status}${i.due_date ? ", due " + i.due_date : ""}]`).join("; ") || "none"));
-    out.push(`Payment terms: due within ${client?.payment_terms_days ?? 7} days of the invoice date${Number(client?.late_interest_percent) > 0 ? `; late interest ${client?.late_interest_percent}% a month after ${client?.late_grace_days ?? 0} grace days` : "; no late interest"}.`);
+    out.push(`Payment terms: due within ${client?.payment_terms_days ?? 7} days of the invoice date${Number(client?.late_interest_percent) > 0 ? `; late fee ${client?.late_interest_percent}% of the unpaid amount for each full week overdue, after ${client?.late_grace_days ?? 0} grace days` : "; no late interest"}.`);
     out.push("Payment plans: " + ((plans ?? []).map((p: any) => p.kind === "recurring"
       ? `${p.title}: ${p.currency} ${p.recurring_amount} every ${p.billing_interval} [${p.status}]`
       : `${p.title}: total ${p.currency} ${p.total_amount} = ` + (p.plan_installments ?? []).map((x: any) => `${x.label} ${x.percent}% (${p.currency} ${x.amount}${x.due_date ? ", due " + x.due_date : ""}${x.invoice_id ? ", invoiced" : ""})`).join(" + ")).join("; ") || "none"));

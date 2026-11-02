@@ -26,11 +26,13 @@ export function daysLate(dueIso: string, today: string | Date, graceDays = 0): n
   return Math.max(0, Math.floor((utcDay(today) - utcDay(dueIso)) / DAY) - Math.max(0, graceDays));
 }
 
-// Simple (not compounded) interest: amount x rate per month x (days late / 30), rounded to pence.
-export function lateInterest(o: { amount: number; due: string; today: string | Date; graceDays: number; percentPerMonth: number }): number {
-  if (!(o.amount > 0) || !(o.percentPerMonth > 0)) return 0;
-  const d = daysLate(o.due, o.today, o.graceDays);
-  return Math.round(o.amount * (o.percentPerMonth / 100) * (d / 30) * 100) / 100;
+// Weekly late fee: every full week the payment is overdue (after the grace period) adds
+// `percentPerWeek` of the unpaid amount. Flat on the original amount, not compounded, rounded to pence.
+export const weeksLate = (dueIso: string, today: string | Date, graceDays = 0): number => Math.floor(daysLate(dueIso, today, graceDays) / 7);
+
+export function lateInterest(o: { amount: number; due: string; today: string | Date; graceDays: number; percentPerWeek: number }): number {
+  if (!(o.amount > 0) || !(o.percentPerWeek > 0)) return 0;
+  return Math.round(o.amount * (o.percentPerWeek / 100) * weeksLate(o.due, o.today, o.graceDays) * 100) / 100;
 }
 
 // Split a total by percentages. Each part is rounded to 2 decimals and the last part

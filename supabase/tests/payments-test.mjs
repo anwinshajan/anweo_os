@@ -11,16 +11,19 @@ ok("inside the grace period nothing is late", daysLate("2026-11-01", "2026-11-03
 ok("works across month and year ends", daysLate("2026-12-28", "2027-01-04") === 7);
 ok("a leap day is counted", daysLate("2028-02-27", "2028-03-01") === 3);
 
-// ---- interest
-ok("30 days late at 2% a month is 2% of the amount", lateInterest({ amount: 1000, due: "2026-11-01", today: "2026-12-01", graceDays: 0, percentPerMonth: 2 }) === 20);
-ok("15 days late is half a month of interest", lateInterest({ amount: 1000, due: "2026-11-01", today: "2026-11-16", graceDays: 0, percentPerMonth: 2 }) === 10);
-ok("the grace period reduces the interest", lateInterest({ amount: 1000, due: "2026-11-01", today: "2026-12-01", graceDays: 15, percentPerMonth: 2 }) === 10);
-ok("no interest when the rate is zero", lateInterest({ amount: 1000, due: "2026-01-01", today: "2026-12-01", graceDays: 0, percentPerMonth: 0 }) === 0);
-ok("no interest when not yet late", lateInterest({ amount: 1000, due: "2026-12-01", today: "2026-11-01", graceDays: 0, percentPerMonth: 2 }) === 0);
-ok("no interest on a zero or negative amount", lateInterest({ amount: 0, due: "2026-01-01", today: "2026-12-01", graceDays: 0, percentPerMonth: 2 }) === 0 && lateInterest({ amount: -5, due: "2026-01-01", today: "2026-12-01", graceDays: 0, percentPerMonth: 2 }) === 0);
-ok("interest is rounded to pence", lateInterest({ amount: 333.33, due: "2026-11-01", today: "2026-11-08", graceDays: 0, percentPerMonth: 1.5 }) === 1.17);
-ok("interest is simple, not compounded (a year late at 2% a month is 24%)", lateInterest({ amount: 1000, due: "2026-01-01", today: "2026-12-27", graceDays: 0, percentPerMonth: 2 }) === 240);
-ok("rupee amounts work the same", lateInterest({ amount: 42000, due: "2026-11-01", today: "2026-11-30", graceDays: 0, percentPerMonth: 2 }) === 812);
+// ---- late fee (weekly, % of the unpaid amount)
+const L = (amount, due, today, graceDays, percentPerWeek) => lateInterest({ amount, due, today, graceDays, percentPerWeek });
+ok("one full week late adds one week's fee", L(1000, "2026-11-01", "2026-11-08", 0, 2) === 20);
+ok("two full weeks late adds two weeks' fees", L(1000, "2026-11-01", "2026-11-15", 0, 2) === 40);
+ok("a part week adds nothing yet", L(1000, "2026-11-01", "2026-11-07", 0, 2) === 0);
+ok("13 days late is still one week", L(1000, "2026-11-01", "2026-11-14", 0, 2) === 20);
+ok("the grace period delays the first fee", L(1000, "2026-11-01", "2026-11-08", 3, 2) === 0 && L(1000, "2026-11-01", "2026-11-11", 3, 2) === 20);
+ok("no fee when the rate is zero", L(1000, "2026-01-01", "2026-12-01", 0, 0) === 0);
+ok("no fee when not yet late", L(1000, "2026-12-01", "2026-11-01", 0, 2) === 0);
+ok("no fee on a zero or negative amount", L(0, "2026-01-01", "2026-12-01", 0, 2) === 0 && L(-5, "2026-01-01", "2026-12-01", 0, 2) === 0);
+ok("fee is rounded to pence", L(333.33, "2026-11-01", "2026-11-08", 0, 1.5) === 5);
+ok("fee is flat, not compounded (10 weeks at 2% is 20%)", L(1000, "2026-11-01", "2027-01-10", 0, 2) === 200);
+ok("rupee amounts work the same", L(42000, "2026-11-01", "2026-11-15", 0, 2) === 1680);
 
 // ---- due dates
 ok("due date defaults to issue date plus terms", effectiveDueDate({ due_date: null, issued_at: "2026-11-01" }, 7) === "2026-11-08");

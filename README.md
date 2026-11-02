@@ -19,10 +19,10 @@ Their plan and monthly total, projects with progress, work, upcoming and publish
 
 ## Payments and billing (admin only)
 Open a client, then the **Billing** tab.
-- **Payment terms per client:** pay within N days, a grace period, and late interest as a percent per month. The client can see these terms.
+- **Payment terms per client:** pay within N days, a grace period, and a weekly late fee (a percent of the unpaid amount). The client can see these terms.
 - **One-time payment:** a total split into up to four payments, for example 50% advance + 50% final. Give a payment a date and it is invoiced automatically 7 days before it is due (an advance due today is invoiced straight away). Leave the date blank to invoice it by hand later, for example on delivery, with **Invoice now**.
 - **Recurring payment:** monthly, quarterly or yearly, with an optional end date. With "create invoices automatically" on, the invoice is created on its date. With it off, it waits under **Finance, Ready to invoice** for you to create. You can also create the next invoice early from the plan.
-- **Late interest:** simple interest (not compounded) after the grace period. It is shown on each overdue invoice and you choose whether to charge it. Charging creates a separate invoice and records what has been charged, so the same interest is never charged twice.
+- **Late fee:** after the grace period, every full week an invoice stays unpaid adds the agreed percent of the unpaid amount (flat, not compounded). It is shown on each overdue invoice and you choose whether to charge it. Charging creates a separate invoice and records what has been charged, so the same interest is never charged twice.
 - **Finance** shows overdue invoices by their real due date, interest not yet charged, and the queue of invoices ready to create.
 - **Daily job:** every morning at 06:00 UTC `/api/cron/billing` creates the invoices that are due from automatic plans. It is protected by `CRON_SECRET` and is safe to run twice because nothing is ever created twice.
 - Check the terms against your contract. Interest on business debts can also be governed by law where you operate.
@@ -82,7 +82,7 @@ Push to GitHub and import into Vercel. Add the variables above under Settings â†
 - Approving a post cannot be done by anyone below manager, even by calling the API directly.
 - Files are in a private bucket. The server checks the database permission first, then hands out a 60-second link.
 - Anweo AI reads data with the signed-in person's own access, so it can never see more than they can. It is rate limited to 30 questions an hour per person and cannot change anything.
-- 168 database checks, 11 currency, 27 payment-maths and 8 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
+- 168 database checks, 11 currency, 29 payment-maths and 8 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
 
 ## Branding
 Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141413`, paper `#F4F3EF`).

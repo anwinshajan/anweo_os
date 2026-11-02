@@ -34,7 +34,7 @@ export default async function Finance() {
     const c = i.clients ?? { payment_terms_days: 7, late_grace_days: 0, late_interest_percent: 0 };
     const due = effectiveDueDate(i, c.payment_terms_days);
     const late = isOverdue(due, today);
-    const accrued = lateInterest({ amount: Number(i.amount), due, today, graceDays: c.late_grace_days, percentPerMonth: Number(c.late_interest_percent) });
+    const accrued = lateInterest({ amount: Number(i.amount), due, today, graceDays: c.late_grace_days, percentPerWeek: Number(c.late_interest_percent) });
     const unbilled = Math.max(0, Math.round((accrued - Number(i.late_fee_charged ?? 0)) * 100) / 100);
     const daysOver = late ? Math.floor((Date.parse(today) - Date.parse(due)) / 86_400_000) : 0;
     return { ...i, due, late, unbilled, daysOver };

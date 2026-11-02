@@ -26,7 +26,7 @@ export default async function BillingTab({ id, client }: { id: string; client: C
   const owed = totals(open);
   const paid = totals((invoices ?? []).filter((i: any) => i.status === "paid"));
   const interestFor = (i: any) => {
-    const accrued = lateInterest({ amount: Number(i.amount), due: effectiveDueDate(i, terms), today, graceDays: client.late_grace_days, percentPerMonth: pct });
+    const accrued = lateInterest({ amount: Number(i.amount), due: effectiveDueDate(i, terms), today, graceDays: client.late_grace_days, percentPerWeek: pct });
     return { accrued, unbilled: Math.max(0, Math.round((accrued - Number(i.late_fee_charged ?? 0)) * 100) / 100) };
   };
   const unbilledInterest = totals(open.map((i: any) => ({ amount: interestFor(i).unbilled, currency: i.currency })).filter((x) => x.amount > 0));
@@ -48,11 +48,11 @@ export default async function BillingTab({ id, client }: { id: string; client: C
           <input type="hidden" name="client_id" value={id} />
           <div><label className="label">Pay within (days)</label><input name="payment_terms_days" type="number" min="0" max="180" step="1" defaultValue={client.payment_terms_days} className="input" /></div>
           <div><label className="label">Grace period (days)</label><input name="late_grace_days" type="number" min="0" max="90" step="1" defaultValue={client.late_grace_days} className="input" /></div>
-          <div><label className="label">Late interest (% per month)</label><input name="late_interest_percent" type="number" min="0" max="50" step="0.01" defaultValue={pct} className="input" /></div>
+          <div><label className="label">Late fee (% of unpaid amount, added each week)</label><input name="late_interest_percent" type="number" min="0" max="50" step="0.01" defaultValue={pct} className="input" /></div>
           <div className="flex items-end"><button className="btn-primary w-full">Save terms</button></div>
           <p className="text-xs text-mute sm:col-span-4">
             New invoices are due {terms} days after they're issued. {pct > 0
-              ? `If one is paid late, interest of ${pct}% a month builds up after a ${client.late_grace_days}-day grace period (simple interest, not compounded). You decide whether to charge it.`
+              ? `If one is paid late, a late fee of ${pct}% of the unpaid amount is added for every full week it stays unpaid, starting after a ${client.late_grace_days}-day grace period (not compounded). You decide whether to charge it.`
               : "Late interest is off for this client. Set a rate above to turn it on."}{" "}
             The client can see these terms. Make sure they match what you agreed in the contract.
           </p>

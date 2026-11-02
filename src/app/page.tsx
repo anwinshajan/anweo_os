@@ -358,7 +358,7 @@ async function ClientPortal({ me }: { me: Me }) {
                 </div>
               );
             })}
-            <p className="pt-1 text-xs text-mute">Payments are due within {terms} days of the invoice date.{lateRate > 0 ? ` Late payments may be charged interest at ${lateRate}% a month after a ${client?.late_grace_days ?? 0}-day grace period, as agreed in your contract.` : ""}</p>
+            <p className="pt-1 text-xs text-mute">Payments are due within {terms} days of the invoice date.{lateRate > 0 ? ` A late fee of ${lateRate}% of the unpaid amount is added for each full week a payment is overdue, after a ${client?.late_grace_days ?? 0}-day grace period.` : ""}</p>
           </div>
         </section>
         <section className="card">
