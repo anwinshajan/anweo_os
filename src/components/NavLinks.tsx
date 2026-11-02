@@ -2,8 +2,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export type IconName = "clients" | "approvals" | "catalogue" | "team" | "chat" | "tasks" | "more" | "home" | "ai" | "account" | "finance" | "pay";
-export type NavItem = { href: string; label: string; icon: IconName };
+export type IconName = "clients" | "approvals" | "catalogue" | "team" | "chat" | "tasks" | "more" | "home" | "ai" | "account" | "finance" | "pay" | "settings";
+export type NavItem = { href: string; label: string; icon: IconName; more?: boolean };
 
 const icons: Record<IconName, React.ReactNode> = {
   clients: <path d="M4 20v-1a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v1M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm9 9v-1a4 4 0 0 0-3-3.9M16 4.2a3.5 3.5 0 0 1 0 6.6" />,
@@ -17,6 +17,7 @@ const icons: Record<IconName, React.ReactNode> = {
   ai: <path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2M12 8.5l1.2 2.3 2.3 1.2-2.3 1.2L12 15.5l-1.2-2.3L8.5 12l2.3-1.2L12 8.5Z" />,
   account: <path d="M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM5 20a7 7 0 0 1 14 0" />,
   finance: <path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6" />,
+  settings: <path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0-5v2m0 12v2M4 12h2m12 0h2M6.3 6.3l1.4 1.4m8.6 8.6 1.4 1.4m0-11.4-1.4 1.4M7.7 16.3l-1.4 1.4" />,
   pay: <path d="M3 8h18v10H3V8Zm0 3h18M7 15h3M6 5h12" />,
 };
 

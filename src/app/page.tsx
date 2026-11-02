@@ -5,6 +5,7 @@ import { Corner, Logo } from "@/components/Logo";
 import { signDocumentAction } from "./actions";
 import { getMe, supabaseServer, type Me } from "@/lib/supabase-server";
 import { isAdminRole, isLeadRole } from "@/lib/roles";
+import { effectiveDueDate, intervalLabel, isOverdue, isoDay } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 
@@ -117,16 +118,21 @@ async function ClientPortal({ me }: { me: Me }) {
   if (!cid) {
     return <div className="card text-center"><p className="font-semibold">Your account isn't linked to a business yet.</p><p className="mt-1 text-sm text-mute">Please ask the Anweo team to finish setting you up.</p></div>;
   }
-  const [{ data: client }, { data: subs }, { data: projects }, { data: work }, { data: posts }, { data: invoices }, { data: docs }, { data: history }] = await Promise.all([
-    sb.from("clients").select("business_name").eq("id", cid).single(),
+  const [{ data: client }, { data: subs }, { data: projects }, { data: work }, { data: posts }, { data: invoices }, { data: docs }, { data: history }, { data: plans }] = await Promise.all([
+    sb.from("clients").select("business_name,payment_terms_days,late_grace_days,late_interest_percent").eq("id", cid).single(),
     sb.from("client_services").select("id,price_monthly,currency,status,start_date,services(name,description)").eq("client_id", cid).order("created_at"),
     sb.from("projects").select("id,title,description,status,due_date,milestones(id,title,done,sort_order)").eq("client_id", cid).order("created_at", { ascending: false }),
     sb.from("work_items").select("id,title,status,due_date,updated_at").eq("client_id", cid).order("updated_at", { ascending: false }),
     sb.from("social_posts").select("id,kind,platform,caption,status,scheduled_at,posted_at").eq("client_id", cid).order("scheduled_at", { ascending: true, nullsFirst: false }),
-    sb.from("invoices").select("id,period_label,amount,currency,status,issued_at,paid_at").eq("client_id", cid).order("issued_at", { ascending: false }),
+    sb.from("invoices").select("id,period_label,amount,currency,status,issued_at,due_date,paid_at").eq("client_id", cid).order("issued_at", { ascending: false }),
     sb.from("documents").select("id,kind,title,status,created_at,signed_at,signed_by_name").eq("client_id", cid).order("created_at", { ascending: false }),
     sb.from("activity_log").select("id,detail,created_at").eq("client_id", cid).eq("client_visible", true).order("created_at", { ascending: false }).limit(12),
+    sb.from("payment_plans").select("id,title,kind,currency,total_amount,recurring_amount,billing_interval,next_invoice_date,end_date,status,plan_installments(id,label,percent,amount,due_date,invoice_id,sort_order)").eq("client_id", cid).neq("status", "cancelled").order("created_at", { ascending: false }),
   ]);
+  const todayIso = isoDay();
+  const terms = client?.payment_terms_days ?? 7;
+  const invById = new Map((invoices ?? []).map((i) => [i.id, i]));
+  const lateRate = Number(client?.late_interest_percent ?? 0);
 
   const activeSubs = (subs ?? []).filter((s: any) => s.status === "active");
   const upcoming = (posts ?? []).filter((p) => p.status !== "posted");
@@ -239,6 +245,46 @@ async function ClientPortal({ me }: { me: Me }) {
         </section>
       </div>
 
+      {(plans ?? []).length > 0 && (
+        <section className="card">
+          <p className="tag mb-3">[ Your payment plan ]</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            {(plans ?? []).map((p: any) => {
+              const inst = [...(p.plan_installments ?? [])].sort((a: any, b: any) => a.sort_order - b.sort_order);
+              return (
+                <div key={p.id} className="rounded-xl border border-edge bg-paper/60 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0"><p className="font-semibold">{p.title}</p>
+                      <p className="font-mono text-[11px] uppercase text-mute">{p.kind === "one_time" ? `One-time · ${money(p.total_amount, p.currency)}` : `${money(p.recurring_amount, p.currency)} every ${intervalLabel[p.billing_interval]}`}</p></div>
+                    {p.status === "paused" && <span className={`pill ${statusPill("paused")}`}>paused</span>}
+                  </div>
+                  {p.kind === "one_time" ? (
+                    <ul className="mt-3 space-y-1.5 text-sm">
+                      {inst.map((x: any) => {
+                        const inv: any = x.invoice_id ? invById.get(x.invoice_id) : null;
+                        const due = inv ? effectiveDueDate(inv, terms) : x.due_date;
+                        const state = inv ? (inv.status === "paid" ? "paid" : isOverdue(due, todayIso) ? "overdue" : "due") : "upcoming";
+                        return (
+                          <li key={x.id} className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2">
+                            <span className="min-w-0"><span className="font-medium">{x.label}</span> <span className="font-mono text-[11px] text-mute">· {Number(x.percent)}%</span>
+                              <span className="block font-mono text-[11px] text-mute">{inv?.status === "paid" ? `Paid ${fmtDate(inv.paid_at)}` : due ? `Due ${fmtDate(due)}` : "Date to be confirmed"}</span></span>
+                            <span className="flex items-center gap-2"><span className="font-semibold">{money(x.amount, p.currency)}</span><span className={`pill ${statusPill(state === "upcoming" ? "planning" : state)}`}>{state}</span></span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 rounded-lg bg-white px-3 py-2.5 font-mono text-[11px] text-mute">
+                      {p.status === "completed" ? "This plan has finished." : `Next invoice ${fmtDate(p.next_invoice_date)}`}{p.end_date ? ` · ends ${fmtDate(p.end_date)}` : ""}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="card">
         <p className="tag mb-3">[ Contracts & documents ]</p>
         <div className="space-y-2">
@@ -301,9 +347,18 @@ async function ClientPortal({ me }: { me: Me }) {
           <p className="tag mb-3">[ Billing history ]</p>
           <div className="space-y-2">
             {(invoices ?? []).length === 0 && <Empty>No invoices yet.</Empty>}
-            {(invoices ?? []).map((i) => (
-              <div key={i.id} className="row"><span>{i.period_label}</span><span className="flex items-center gap-2"><span className="font-semibold">{money(i.amount, i.currency)}</span><span className={`pill ${statusPill(i.status)}`}>{i.status}</span></span></div>
-            ))}
+            {(invoices ?? []).map((i) => {
+              const due = effectiveDueDate(i, terms);
+              const late = (i.status === "due" || i.status === "overdue") && isOverdue(due, todayIso);
+              return (
+                <div key={i.id} className="row">
+                  <div className="min-w-0"><p className="truncate">{i.period_label}</p>
+                    <p className="font-mono text-[11px] text-mute">{i.status === "paid" ? `Paid ${fmtDate(i.paid_at)}` : `Due ${fmtDate(due)}`}</p></div>
+                  <span className="flex shrink-0 items-center gap-2"><span className="font-semibold">{money(i.amount, i.currency)}</span><span className={`pill ${statusPill(late ? "overdue" : i.status)}`}>{late ? "overdue" : i.status}</span><a href={`/invoices/${i.id}`} className="text-xs font-medium text-forest hover:underline">Invoice</a></span>
+                </div>
+              );
+            })}
+            <p className="pt-1 text-xs text-mute">Payments are due within {terms} days of the invoice date.{lateRate > 0 ? ` Late payments may be charged interest at ${lateRate}% a month after a ${client?.late_grace_days ?? 0}-day grace period, as agreed in your contract.` : ""}</p>
           </div>
         </section>
         <section className="card">

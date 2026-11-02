@@ -29,14 +29,15 @@ async function buildContext(sb: Sb, me: Me): Promise<string> {
 
   if (me.role === "client" && me.client_id) {
     const cid = me.client_id;
-    const [{ data: client }, { data: subs }, { data: projects }, { data: work }, { data: posts }, { data: invoices }, { data: docs }] = await Promise.all([
-      sb.from("clients").select("business_name").eq("id", cid).single(),
+    const [{ data: client }, { data: subs }, { data: projects }, { data: work }, { data: posts }, { data: invoices }, { data: docs }, { data: plans }] = await Promise.all([
+      sb.from("clients").select("business_name,payment_terms_days,late_grace_days,late_interest_percent").eq("id", cid).single(),
       sb.from("client_services").select("price_monthly,currency,status,services(name)").eq("client_id", cid),
       sb.from("projects").select("title,status,due_date,milestones(done)").eq("client_id", cid),
       sb.from("work_items").select("title,status").eq("client_id", cid).limit(30),
       sb.from("social_posts").select("kind,platform,status,scheduled_at,caption").eq("client_id", cid).neq("status", "posted").limit(10),
-      sb.from("invoices").select("period_label,amount,currency,status").eq("client_id", cid).limit(12),
+      sb.from("invoices").select("period_label,amount,currency,status,issued_at,due_date").eq("client_id", cid).limit(12),
       sb.from("documents").select("title,kind,status").eq("client_id", cid).limit(20),
+      sb.from("payment_plans").select("title,kind,currency,total_amount,recurring_amount,billing_interval,status,plan_installments(label,percent,amount,due_date,invoice_id)").eq("client_id", cid).neq("status", "cancelled"),
     ]);
     out.push(`THIS CLIENT'S ACCOUNT (${client?.business_name ?? ""}):`);
     out.push("Services: " + ((subs ?? []).map((s: any) => `${s.services?.name} ${s.currency} ${s.price_monthly}/mo [${s.status}]`).join("; ") || "none yet"));
@@ -46,7 +47,11 @@ async function buildContext(sb: Sb, me: Me): Promise<string> {
     }).join("; ") || "none"));
     out.push("Work: " + ((work ?? []).map((w) => `${w.title} [${w.status}]`).join("; ") || "none"));
     out.push("Upcoming content: " + ((posts ?? []).map((p) => `${p.kind} on ${p.platform} [${p.status}${p.scheduled_at ? ", " + p.scheduled_at.slice(0, 10) : ""}]`).join("; ") || "none"));
-    out.push("Invoices: " + ((invoices ?? []).map((i) => `${i.period_label} ${i.currency} ${i.amount} [${i.status}]`).join("; ") || "none"));
+    out.push("Invoices: " + ((invoices ?? []).map((i) => `${i.period_label} ${i.currency} ${i.amount} [${i.status}${i.due_date ? ", due " + i.due_date : ""}]`).join("; ") || "none"));
+    out.push(`Payment terms: due within ${client?.payment_terms_days ?? 7} days of the invoice date${Number(client?.late_interest_percent) > 0 ? `; late interest ${client?.late_interest_percent}% a month after ${client?.late_grace_days ?? 0} grace days` : "; no late interest"}.`);
+    out.push("Payment plans: " + ((plans ?? []).map((p: any) => p.kind === "recurring"
+      ? `${p.title}: ${p.currency} ${p.recurring_amount} every ${p.billing_interval} [${p.status}]`
+      : `${p.title}: total ${p.currency} ${p.total_amount} = ` + (p.plan_installments ?? []).map((x: any) => `${x.label} ${x.percent}% (${p.currency} ${x.amount}${x.due_date ? ", due " + x.due_date : ""}${x.invoice_id ? ", invoiced" : ""})`).join(" + ")).join("; ") || "none"));
     out.push("Documents: " + ((docs ?? []).map((d) => `${d.title} (${d.kind}, ${d.status})`).join("; ") || "none"));
   } else if (isLeadRole(me.role)) {
     const { data: clients } = await sb.from("clients").select("business_name,status,client_services(status,services(name))").order("created_at", { ascending: false }).limit(60);

@@ -11,6 +11,8 @@ const sql2 = mig("0002_activity_visibility.sql");
 const sql3 = mig("0003_roles.sql");
 const sql4 = mig("0004_phase2.sql");
 const sql6 = mig("0006_currencies.sql");
+const sql7 = mig("0007_payment_plans.sql");
+const sql8 = mig("0008_invoice_documents.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -27,6 +29,8 @@ await db.exec(sql2);
 await db.exec(sql3);
 await db.exec(sql4);
 await db.exec(sql6);
+await db.exec(sql7);
+await db.exec(sql8);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -370,6 +374,155 @@ await as(mgr, async () => {
 await as(cA, async () => {
   const p = (await q(`select prices from packages where name = 'Growth'`)).rows[0];
   ok("clients can read package prices in their currency", p.prices.INR === 30000);
+});
+
+// =================== PAYMENT PLANS & BILLING ===================
+const day = (offset) => `(current_date + (${offset}))::date`;
+await as(admin, async () => {
+  // ---- terms constraints
+  let b = false; try { await q(`update clients set payment_terms_days = -1 where id='${clA}'`); } catch { b = true; }
+  ok("payment terms cannot be negative", b);
+  b = false; try { await q(`update clients set late_interest_percent = 60 where id='${clA}'`); } catch { b = true; }
+  ok("late interest is capped (50% a month)", b);
+  await q(`update clients set payment_terms_days = 10, late_grace_days = 3, late_interest_percent = 2 where id='${clA}'`);
+  const t = (await q(`select payment_terms_days d, late_grace_days g, late_interest_percent p from clients where id='${clA}'`)).rows[0];
+  ok("admin can save a client's payment terms", t.d === 10 && t.g === 3 && Number(t.p) === 2);
+  b = false; try { await q(`insert into payment_plans(client_id,title,kind,currency) values ('${clA}','bad','recurring','GBP')`); } catch { b = true; }
+  ok("a recurring plan must have an amount, interval and start date", b);
+  b = false; try { await q(`insert into payment_plans(client_id,title,kind,currency,total_amount,recurring_amount) values ('${clA}','bad','one_time','GBP',100,50)`); } catch { b = true; }
+  ok("a one-time plan cannot also carry a recurring amount", b);
+
+  // ---- date helpers
+  const m = (await q(`select to_char(_next_period('2026-01-31','monthly',1),'YYYY-MM-DD') a, to_char(_next_period('2026-01-31','monthly',2),'YYYY-MM-DD') b, to_char(_next_period('2026-01-15','quarterly',1),'YYYY-MM-DD') c, to_char(_next_period('2026-03-01','yearly',2),'YYYY-MM-DD') d`)).rows[0];
+  ok("month-end billing does not drift (31 Jan, 28 Feb, 31 Mar)", m.a === "2026-02-28" && m.b === "2026-03-31");
+  ok("quarterly and yearly steps", m.c === "2026-04-15" && m.d === "2028-03-01");
+  const lab = (await q(`select _period_label('2026-11-05','monthly') a, _period_label('2026-11-05','quarterly') b, _period_label('2026-11-05','yearly') c`)).rows[0];
+  ok("invoice period labels", lab.a === "November 2026" && lab.b === "Q4 2026" && lab.c === "2026");
+
+  // ---- recurring: three missed months catch up once, never twice
+  const rec = (await q(`insert into payment_plans(client_id,title,kind,currency,recurring_amount,billing_interval,start_date,next_invoice_date,auto_invoice)
+     values ('${clA}','Retainer','recurring','GBP',300,'monthly', ${day("'-2 months'::interval")}, ${day("'-2 months'::interval")}, true) returning id`)).rows[0].id;
+  const n1 = (await q(`select run_billing(false) n`)).rows[0].n;
+  ok("billing run catches up 3 missed months for an automatic plan", n1 === 3);
+  const inv = (await q(`select count(*)::int c, min(due_date)::text dmin, min(amount)::numeric a from invoices where plan_id='${rec}'`)).rows[0];
+  ok("those 3 invoices exist with the plan's amount", inv.c === 3 && Number(inv.a) === 300);
+  const n2 = (await q(`select run_billing(false) n`)).rows[0].n;
+  ok("running billing again creates nothing (no duplicates)", n2 === 0);
+  const pl = (await q(`select periods_billed pb, to_char(next_invoice_date,'YYYY-MM-DD') nx from payment_plans where id='${rec}'`)).rows[0];
+  ok("the plan moves on to next month", pl.pb === 3);
+  const dues = (await q(`select due_date >= current_date as ok from invoices where plan_id='${rec}'`)).rows;
+  ok("invoice due dates are never in the past (terms start from today)", dues.every((r) => r.ok));
+  const lg = (await q(`select count(*)::int c from activity_log where client_id='${clA}' and action='invoice_issued' and client_visible`)).rows[0].c;
+  ok("each issued invoice is recorded in the client's history", lg >= 3);
+
+  // ---- manual plans only run when asked
+  const man = (await q(`insert into payment_plans(client_id,title,kind,currency,recurring_amount,billing_interval,start_date,next_invoice_date,auto_invoice)
+     values ('${clA}','Hosting','recurring','GBP',20,'monthly', ${day("'0 days'::interval")}, ${day("'0 days'::interval")}, false) returning id`)).rows[0].id;
+  ok("a non-automatic plan is skipped by the daily job", (await q(`select run_billing(false) n`)).rows[0].n === 0);
+  ok("but the admin's 'create invoices now' includes it", (await q(`select run_billing(true) n`)).rows[0].n === 1);
+
+  // ---- end date completes a plan
+  const ending = (await q(`insert into payment_plans(client_id,title,kind,currency,recurring_amount,billing_interval,start_date,next_invoice_date,end_date,auto_invoice)
+     values ('${clA}','Short deal','recurring','GBP',50,'monthly', ${day("'-1 months'::interval")}, ${day("'-1 months'::interval")}, ${day("'0 days'::interval")}, true) returning id`)).rows[0].id;
+  await q(`select run_billing(false)`);
+  const e = (await q(`select status::text s, (select count(*)::int from invoices where plan_id='${ending}') c from payment_plans where id='${ending}'`)).rows[0];
+  ok("a plan that reaches its end date is marked completed", e.s === "completed" && e.c === 2);
+
+  // ---- paused plans are not billed
+  const paused = (await q(`insert into payment_plans(client_id,title,kind,currency,recurring_amount,billing_interval,start_date,next_invoice_date,auto_invoice,status)
+     values ('${clA}','On hold','recurring','GBP',75,'monthly', ${day("'-1 months'::interval")}, ${day("'-1 months'::interval")}, true, 'paused') returning id`)).rows[0].id;
+  await q(`select run_billing(true)`);
+  ok("a paused plan creates no invoices", (await q(`select count(*)::int c from invoices where plan_id='${paused}'`)).rows[0].c === 0);
+
+  // ---- one-time plan: advance now, final on delivery
+  const one = (await q(`insert into payment_plans(client_id,title,kind,currency,total_amount) values ('${clA}','Website build','one_time','GBP',1000) returning id`)).rows[0].id;
+  await q(`insert into plan_installments(plan_id,label,percent,amount,due_date,sort_order) values ('${one}','Advance',50,500,current_date,1)`);
+  const fin = (await q(`insert into plan_installments(plan_id,label,percent,amount,due_date,sort_order) values ('${one}','Final',50,500,null,2) returning id`)).rows[0].id;
+  ok("the advance is invoiced by the billing run, the undated final is not", (await q(`select run_billing(true) n`)).rows[0].n === 1);
+  const adv = (await q(`select i.amount::numeric a, i.due_date = current_date as due_today from plan_installments p join invoices i on i.id = p.invoice_id where p.plan_id='${one}' and p.label='Advance'`)).rows[0];
+  ok("the advance invoice is for half and due on its date", Number(adv.a) === 500 && adv.due_today);
+  const finInv = (await q(`select invoice_installment('${fin}') id`)).rows[0].id;
+  const fi = (await q(`select amount::numeric a, (due_date - current_date)::int d from invoices where id='${finInv}'`)).rows[0];
+  ok("'invoice now' issues the final using the client's payment terms (10 days)", Number(fi.a) === 500 && fi.d === 10);
+  b = false; try { await q(`select invoice_installment('${fin}')`); } catch { b = true; }
+  ok("an installment cannot be invoiced twice", b);
+
+  // dated final: issued only within 7 days of its due date
+  const two = (await q(`insert into payment_plans(client_id,title,kind,currency,total_amount) values ('${clA}','App build','one_time','GBP',600) returning id`)).rows[0].id;
+  await q(`insert into plan_installments(plan_id,label,percent,amount,due_date,sort_order) values ('${two}','Stage 1',50,300,${day("'30 days'::interval")},1),('${two}','Stage 2',50,300,${day("'5 days'::interval")},2)`);
+  ok("only the installment due within 7 days is issued", (await q(`select run_billing(true) n`)).rows[0].n === 1);
+  ok("the one 30 days away waits", (await q(`select count(*)::int c from plan_installments where plan_id='${two}' and invoice_id is null`)).rows[0].c === 1);
+
+  // recurring: invoice the next period now
+  const nowPlan = (await q(`insert into payment_plans(client_id,title,kind,currency,recurring_amount,billing_interval,start_date,next_invoice_date) values ('${clA}','Maintenance','recurring','GBP',40,'monthly',${day("'20 days'::interval")},${day("'20 days'::interval")}) returning id`)).rows[0].id;
+  await q(`select invoice_recurring_now('${nowPlan}')`);
+  const np = (await q(`select periods_billed pb from payment_plans where id='${nowPlan}'`)).rows[0];
+  ok("'create next invoice now' works ahead of schedule and advances the plan", np.pb === 1);
+
+  ok("admin sees all plans", (await q(`select id from payment_plans`)).rows.length >= 6);
+});
+
+// ---- who can run billing or see plans
+await q(`insert into payment_plans(client_id,title,kind,currency,total_amount) values ('${clB}','B project','one_time','GBP',900)`);
+for (const [name, uid] of [["manager", mgr], ["developer", dev], ["marketing", mk]]) {
+  await as(uid, async () => {
+    ok(`${name} cannot see payment plans`, (await q(`select id from payment_plans`)).rows.length === 0);
+    ok(`${name} cannot see installments`, (await q(`select id from plan_installments`)).rows.length === 0);
+    let b = false; try { await q(`select run_billing(true)`); } catch { b = true; }
+    ok(`${name} cannot run billing`, b);
+    b = false; try { await q(`insert into payment_plans(client_id,title,kind,currency,total_amount) values ('${clA}','x','one_time','GBP',1)`); } catch { b = true; }
+    ok(`${name} cannot create plans`, b);
+  });
+}
+await as(cA, async () => {
+  const p = (await q(`select title from payment_plans`)).rows.map((r) => r.title);
+  ok("a client sees only their own payment plans", p.length > 0 && !p.includes("B project"));
+  ok("a client sees their installments", (await q(`select id from plan_installments`)).rows.length > 0);
+  let b = false; try { await q(`select run_billing(true)`); } catch { b = true; }
+  ok("a client cannot run billing", b);
+  b = false; try { await q(`select invoice_installment((select id from plan_installments limit 1))`); } catch { b = true; }
+  ok("a client cannot issue an invoice", b);
+  b = false; const u = await q(`update payment_plans set status='cancelled'`); b = u.affectedRows === 0;
+  ok("a client cannot change a plan", b);
+  const iv = (await q(`select plan_id from invoices where plan_id is not null`)).rows;
+  ok("a client sees the invoices their plans created", iv.length > 0);
+});
+await as(cB, async () => {
+  ok("another client sees only their own plan", (await q(`select title from payment_plans`)).rows.map((r) => r.title).join() === "B project");
+});
+
+// =================== INVOICE DOCUMENTS ===================
+await as(admin, async () => {
+  const nums = (await q(`select invoice_no n from invoices order by invoice_no`)).rows.map((r) => r.n);
+  ok("every invoice has a number", nums.length > 0 && nums.every((n) => Number.isInteger(n) && n > 0));
+  ok("invoice numbers are unique", new Set(nums).size === nums.length);
+  const a = (await q(`insert into invoices(client_id,period_label,amount) values ('${clA}','num test 1',1) returning invoice_no n`)).rows[0].n;
+  const b = (await q(`insert into invoices(client_id,period_label,amount) values ('${clA}','num test 2',1) returning invoice_no n`)).rows[0].n;
+  ok("new invoices get the next number automatically", b === a + 1 && a > Math.max(...nums));
+  let dup = false; try { await q(`update invoices set invoice_no = ${a} where invoice_no = ${b}`); } catch { dup = true; }
+  ok("two invoices can never share a number", dup);
+
+  await q(`update company_settings set legal_name='Anweo Ltd', payment_details='Bank: Example Bank, Sort 00-00-00, Acc 12345678', tax_number='GB123456789' where id = 1`);
+  ok("admin can edit the company details", (await q(`select legal_name from company_settings`)).rows[0].legal_name === "Anweo Ltd");
+  let b2 = false; try { await q(`insert into company_settings(id) values (2)`); } catch { b2 = true; }
+  ok("there can only ever be one company settings row", b2);
+  await q(`update clients set address='12 High Street, Kochi', tax_id='GSTIN-TEST-1' where id='${clA}'`);
+  ok("client address and tax number can be saved", (await q(`select address from clients where id='${clA}'`)).rows[0].address.includes("Kochi"));
+});
+for (const [name, uid] of [["client", cA], ["developer", dev], ["manager", mgr]]) {
+  await as(uid, async () => {
+    const r = (await q(`select legal_name, payment_details from company_settings`)).rows;
+    ok(`${name} can read the company details printed on invoices`, r.length === 1 && r[0].legal_name === "Anweo Ltd" && r[0].payment_details.includes("Bank"));
+    let w = false; const u = await q(`update company_settings set legal_name='Hacked'`); w = u.affectedRows === 0;
+    ok(`${name} cannot change the company details`, w);
+  });
+}
+await as(rando, async () => {
+  ok("a pending (not yet active) user cannot read company details", (await q(`select id from company_settings`)).rows.length === 0);
+});
+await as(cA, async () => {
+  const inv = (await q(`select invoice_no from invoices`)).rows;
+  ok("a client's invoices carry their numbers", inv.length > 0 && inv.every((r) => r.invoice_no > 0));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

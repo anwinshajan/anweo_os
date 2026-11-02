@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getMe, supabaseAdmin, supabaseServer } from "@/lib/supabase-server";
 import { STAFF_ROLES, isAdminRole, isLeadRole, type Role } from "@/lib/roles";
 import { BASE_CURRENCY, CURRENCIES, currencyForCountry, isCurrency } from "@/lib/currency";
+import { addDays, isoDay, lateInterest, effectiveDueDate, percentsAddUp, splitAmounts } from "@/lib/payments";
 
 /* ------------------------------------------------------------------ guards */
 async function requireActive() {
@@ -84,6 +85,8 @@ export async function updateClientAction(form: FormData) {
       country: str(form, "country") || "India",
       currency: cur(form, "currency", currencyForCountry(str(form, "country") || "India")),
       notes: str(form, "notes") || null,
+      address: str(form, "address") || null,
+      tax_id: str(form, "tax_id") || null,
     })
     .eq("id", id);
   if (error) throw new Error(error.message);
@@ -485,9 +488,11 @@ export async function addInvoiceAction(form: FormData) {
   if (!client_id || !(amount > 0)) throw new Error("Enter an amount above zero");
   const period = str(form, "period_label") || new Date().toLocaleString("en-GB", { month: "long", year: "numeric" });
   const draft = form.get("draft") === "on";
-  const { data: client } = await sb.from("clients").select("currency").eq("id", client_id).single();
+  const { data: client } = await sb.from("clients").select("currency,payment_terms_days").eq("id", client_id).single();
+  const due = /^\d{4}-\d{2}-\d{2}$/.test(str(form, "due_date")) ? str(form, "due_date") : addDays(isoDay(), client?.payment_terms_days ?? 7);
   const { error } = await sb.from("invoices").insert({
-    client_id, period_label: period, amount, currency: cur(form, "currency", client?.currency ?? BASE_CURRENCY), status: draft ? "draft" : "due",
+    client_id, period_label: period, amount, currency: cur(form, "currency", client?.currency ?? BASE_CURRENCY),
+    status: draft ? "draft" : "due", due_date: due,
   });
   if (error) throw new Error(error.message);
   if (!draft) await logEvent(sb, me.id, client_id, "invoice_issued", `Invoice issued: ${period}`, true);
@@ -512,7 +517,9 @@ export async function markInvoicePaidAction(form: FormData) {
 export async function sendDraftInvoiceAction(form: FormData) {
   const me = await requireAdmin();
   const sb = await supabaseServer();
-  const { data: inv } = await sb.from("invoices").update({ status: "due" }).eq("id", str(form, "id")).eq("status", "draft").select("period_label,client_id").single();
+  const { data: draftInv } = await sb.from("invoices").select("client_id,clients(payment_terms_days)").eq("id", str(form, "id")).eq("status", "draft").single();
+  const terms = (draftInv?.clients as unknown as { payment_terms_days: number } | null)?.payment_terms_days ?? 7;
+  const { data: inv } = await sb.from("invoices").update({ status: "due", issued_at: isoDay(), due_date: addDays(isoDay(), terms) }).eq("id", str(form, "id")).eq("status", "draft").select("period_label,client_id").single();
   if (inv) await logEvent(sb, me.id, inv.client_id, "invoice_issued", `Invoice issued: ${inv.period_label}`, true);
   revalidatePath(`/clients/${inv?.client_id}`);
   revalidatePath("/finance");
@@ -625,6 +632,172 @@ export async function setAccountStatusAction(form: FormData) {
   revalidatePath("/team");
 }
 
+/* ------------------------------------------------------------------ payment terms & plans (admin only) */
+const intIn = (f: FormData, k: string, min: number, max: number, fallback: number) => {
+  const raw = str(f, k);
+  if (raw === "") return fallback;
+  const v = Number(raw);
+  if (!Number.isInteger(v) || v < min || v > max) throw new Error(`Enter a whole number from ${min} to ${max}`);
+  return v;
+};
+
+export async function savePaymentTermsAction(form: FormData) {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const pct = str(form, "late_interest_percent") === "" ? 0 : Number(str(form, "late_interest_percent"));
+  if (!(pct >= 0 && pct <= 50)) throw new Error("Late interest must be between 0 and 50 percent a month");
+  const { error } = await sb.from("clients").update({
+    payment_terms_days: intIn(form, "payment_terms_days", 0, 180, 7),
+    late_grace_days: intIn(form, "late_grace_days", 0, 90, 0),
+    late_interest_percent: pct,
+  }).eq("id", client_id);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${client_id}`);
+}
+
+// One-time payment, split into up to four instalments (for example 50% advance + 50% final).
+export async function createOneTimePlanAction(form: FormData) {
+  const me = await requireAdmin();
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const title = str(form, "title");
+  const total = num(form, "total");
+  if (!client_id || !title) throw new Error("Give the payment a name");
+  if (!(total > 0)) throw new Error("Enter the total amount");
+
+  const rows: { label: string; percent: number; due: string | null }[] = [];
+  for (let i = 1; i <= 4; i++) {
+    const pctRaw = str(form, `percent_${i}`);
+    if (pctRaw === "") continue;
+    const percent = Number(pctRaw);
+    if (!(percent > 0 && percent <= 100)) throw new Error(`Instalment ${i}: the percentage must be between 0 and 100`);
+    const due = str(form, `due_${i}`);
+    if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new Error(`Instalment ${i}: that date isn't valid`);
+    rows.push({ label: str(form, `label_${i}`) || `Payment ${i}`, percent, due: due || null });
+  }
+  if (rows.length === 0) throw new Error("Add at least one instalment");
+  if (!percentsAddUp(rows.map((r) => r.percent))) throw new Error("The percentages must add up to exactly 100");
+
+  const currency = cur(form, "currency");
+  const amounts = splitAmounts(total, rows.map((r) => r.percent));
+  const { data: plan, error } = await sb.from("payment_plans").insert({
+    client_id, title, kind: "one_time", currency, total_amount: total, notes: str(form, "notes") || null, created_by: me.id,
+  }).select("id").single();
+  if (error) throw new Error(error.message);
+
+  const { error: iErr } = await sb.from("plan_installments").insert(
+    rows.map((r, idx) => ({ plan_id: plan.id, label: r.label, percent: r.percent, amount: amounts[idx], due_date: r.due, sort_order: idx + 1 }))
+  );
+  if (iErr) {
+    await sb.from("payment_plans").delete().eq("id", plan.id); // never leave a plan without its schedule
+    throw new Error(iErr.message);
+  }
+  await logEvent(sb, me.id, client_id, "plan_created", `Payment plan agreed: ${title}`, true);
+  await sb.rpc("run_billing", { p_include_manual: false }); // issues anything already due, e.g. an advance due today
+  revalidatePath(`/clients/${client_id}`);
+  revalidatePath("/finance");
+}
+
+// Repeating payment: monthly, quarterly or yearly.
+export async function createRecurringPlanAction(form: FormData) {
+  const me = await requireAdmin();
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const title = str(form, "title");
+  const amount = num(form, "amount");
+  const interval = str(form, "billing_interval");
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(str(form, "start_date")) ? str(form, "start_date") : isoDay();
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(str(form, "end_date")) ? str(form, "end_date") : null;
+  if (!client_id || !title) throw new Error("Give the payment a name");
+  if (!(amount > 0)) throw new Error("Enter the amount per period");
+  if (!["monthly", "quarterly", "yearly"].includes(interval)) throw new Error("Pick how often it repeats");
+  if (end && end < start) throw new Error("The end date can't be before the start date");
+
+  const { error } = await sb.from("payment_plans").insert({
+    client_id, title, kind: "recurring", currency: cur(form, "currency"), recurring_amount: amount,
+    billing_interval: interval, start_date: start, next_invoice_date: start, end_date: end,
+    auto_invoice: form.get("auto_invoice") === "on", notes: str(form, "notes") || null, created_by: me.id,
+  });
+  if (error) throw new Error(error.message);
+  await logEvent(sb, me.id, client_id, "plan_created", `Recurring payment agreed: ${title}`, true);
+  await sb.rpc("run_billing", { p_include_manual: false });
+  revalidatePath(`/clients/${client_id}`);
+  revalidatePath("/finance");
+}
+
+export async function invoiceInstallmentAction(form: FormData) {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const { error } = await sb.rpc("invoice_installment", { p_inst: str(form, "id") });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`);
+  revalidatePath("/finance");
+}
+
+export async function invoiceRecurringNowAction(form: FormData) {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const { error } = await sb.rpc("invoice_recurring_now", { p_plan: str(form, "id") });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`);
+  revalidatePath("/finance");
+}
+
+export async function setPlanStatusAction(form: FormData) {
+  const me = await requireAdmin();
+  const sb = await supabaseServer();
+  const status = str(form, "status");
+  if (!["active", "paused", "cancelled"].includes(status)) return;
+  const client_id = str(form, "client_id");
+  const { data: plan } = await sb.from("payment_plans").update({ status }).eq("id", str(form, "id")).select("title").single();
+  if (plan && status === "cancelled") await logEvent(sb, me.id, client_id, "plan_cancelled", `Payment plan ended: ${plan.title}`, true);
+  revalidatePath(`/clients/${client_id}`);
+  revalidatePath("/finance");
+}
+
+// "Create all invoices that are ready" (includes recurring plans that aren't set to run by themselves).
+export async function runBillingAction() {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const { error } = await sb.rpc("run_billing", { p_include_manual: true });
+  if (error) throw new Error(error.message);
+  revalidatePath("/finance");
+  revalidatePath("/");
+}
+
+// Charge the late interest that has built up on an overdue invoice, as its own invoice.
+export async function chargeLateInterestAction(form: FormData) {
+  const me = await requireAdmin();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const { data: inv } = await sb
+    .from("invoices")
+    .select("id,client_id,period_label,amount,currency,status,issued_at,due_date,late_fee_charged,clients(payment_terms_days,late_grace_days,late_interest_percent)")
+    .eq("id", id).single();
+  if (!inv || inv.status === "paid" || inv.status === "void" || inv.status === "draft") throw new Error("Interest can only be charged on an unpaid, issued invoice");
+  const c = inv.clients as unknown as { payment_terms_days: number; late_grace_days: number; late_interest_percent: number };
+  const accrued = lateInterest({
+    amount: Number(inv.amount), due: effectiveDueDate(inv, c.payment_terms_days), today: isoDay(),
+    graceDays: c.late_grace_days, percentPerMonth: Number(c.late_interest_percent),
+  });
+  const unbilled = Math.round((accrued - Number(inv.late_fee_charged)) * 100) / 100;
+  if (!(unbilled >= 0.01)) throw new Error("There's no new late interest to charge on this invoice");
+  const typed = str(form, "amount");
+  const amount = typed === "" ? unbilled : Number(typed);
+  if (!(amount > 0) || amount > unbilled + 0.005) throw new Error(`You can charge up to ${unbilled.toFixed(2)} right now`);
+
+  const { error } = await sb.from("invoices").insert({
+    client_id: inv.client_id, period_label: `Late payment interest: ${inv.period_label}`, amount, currency: inv.currency,
+    status: "due", issued_at: isoDay(), due_date: addDays(isoDay(), c.payment_terms_days),
+  });
+  if (error) throw new Error(error.message);
+  await sb.from("invoices").update({ late_fee_charged: Math.round((Number(inv.late_fee_charged) + amount) * 100) / 100 }).eq("id", id);
+  await logEvent(sb, me.id, inv.client_id, "late_interest", `Late payment interest charged on: ${inv.period_label}`, true);
+  revalidatePath(`/clients/${inv.client_id}`);
+  revalidatePath("/finance");
+}
+
 /* ------------------------------------------------------------------ account */
 export async function updateOwnProfileAction(form: FormData) {
   const me = await requireActive();
@@ -639,4 +812,27 @@ export async function updateOwnProfileAction(form: FormData) {
 export async function signOutAction() {
   await (await supabaseServer()).auth.signOut();
   redirect("/login");
+}
+
+
+/* ----------------------------------------------------------- company settings */
+export async function saveCompanySettingsAction(form: FormData) {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const legal_name = str(form, "legal_name");
+  if (!legal_name) throw new Error("Business name is required");
+  const { error } = await sb.from("company_settings").upsert({
+    id: 1,
+    legal_name,
+    address: str(form, "address") || null,
+    email: str(form, "email") || null,
+    phone: str(form, "phone") || null,
+    website: str(form, "website") || null,
+    tax_label: str(form, "tax_label") || "Tax ID",
+    tax_number: str(form, "tax_number") || null,
+    payment_details: str(form, "payment_details") || null,
+    invoice_note: str(form, "invoice_note") || null,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings");
 }

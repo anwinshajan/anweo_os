@@ -26,6 +26,7 @@ export function navFor(me: Me): NavItem[] {
     ...(lead ? [{ href: "/catalogue", label: "Services", icon: "catalogue" } as NavItem] : []),
     ...(admin ? [{ href: "/finance", label: "Finance", icon: "finance" } as NavItem] : []),
     ...(admin ? [{ href: "/team", label: "Team", icon: "team" } as NavItem] : []),
+    ...(admin ? [{ href: "/settings", label: "Settings", icon: "settings", more: true } as NavItem] : []),
     ...(!admin ? [{ href: "/pay", label: "My pay", icon: "pay" } as NavItem] : []),
   ];
 }
@@ -49,7 +50,7 @@ export default function Shell({ me, children }: { me: Me; children: React.ReactN
       <header className="sticky top-0 z-20 border-b border-edge bg-paper/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
           <Link href="/" aria-label="Anweo home"><Logo /></Link>
-          <TopNav items={all} />
+          <TopNav items={all.filter((i) => !i.more)} />
           <div className="flex items-center gap-2.5">
             <Link href="/account" className="flex items-center gap-2.5" aria-label="My account">
               <div className="hidden text-right leading-tight sm:block">
@@ -121,9 +122,9 @@ export const showTotals = (t: Record<string, number>) => {
 };
 
 // Each currency on its own line. Use this for big numbers.
-export function Totals({ t, className = "" }: { t: Record<string, number>; className?: string }) {
+export function Totals({ t, className = "", empty }: { t: Record<string, number>; className?: string; empty?: string }) {
   const keys = byCurrency(t);
-  if (keys.length === 0) return <div className={className}>{money(0)}</div>;
+  if (keys.length === 0) return <div className={className}>{empty ?? money(0)}</div>;
   return (
     <div className={className}>
       {keys.map((c) => <div key={c}>{money(t[c], c)}</div>)}

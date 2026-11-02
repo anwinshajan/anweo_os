@@ -24,3 +24,11 @@ h1, h2, h3 { letter-spacing: -0.025em; }
   .pill { @apply inline-flex items-center rounded-full px-2.5 py-0.5 font-mono text-[10.5px] font-medium uppercase tracking-wider; }
   .row { @apply flex items-center justify-between gap-3 rounded-xl border border-edge bg-paper/60 px-3.5 py-3 text-sm; }
 }
+
+@page { size: A4; margin: 0; }
+@media print {
+  html, body { background: #fff !important; }
+  header, nav, .print\:hidden { display: none !important; }
+  main { padding: 0 !important; max-width: none !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

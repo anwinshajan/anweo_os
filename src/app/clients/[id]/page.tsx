@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import Shell, { Empty, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import UploadForm from "@/components/UploadForm";
+import BillingTab from "./BillingTab";
 import CountryCurrency from "@/components/CountryCurrency";
 import CurrencySelect from "@/components/CurrencySelect";
 import {
-  addInvoiceAction, addMilestoneAction, addPostAction, addWorkAction, assignServiceAction, createProjectAction,
-  deleteDocumentAction, markInvoicePaidAction, removeServiceAction, sendDraftInvoiceAction, setClientStatusAction,
+  addMilestoneAction, addPostAction, addWorkAction, assignServiceAction, createProjectAction,
+  deleteDocumentAction, removeServiceAction, setClientStatusAction,
   setDocumentSharingAction, setProjectStatusAction, setWorkStatusAction, toggleMilestoneAction, updateClientAction,
 } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
@@ -70,7 +71,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
         {tab === "projects" && <Projects id={id} />}
         {tab === "documents" && <Documents id={id} lead={lead} />}
         {tab === "work" && <WorkAndContent id={id} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
-        {tab === "billing" && admin && <Billing id={id} currency={client.currency} />}
+        {tab === "billing" && admin && <BillingTab id={id} client={client} />}
       </div>
     </Shell>
   );
@@ -139,6 +140,8 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
             <div><label className="label">Email</label><input name="email" type="email" defaultValue={client.email ?? ""} className="input" /></div>
             <div><label className="label">Phone / WhatsApp</label><input name="phone" defaultValue={client.phone ?? ""} className="input" /></div>
             <CountryCurrency defaultCountry={client.country ?? "India"} defaultCurrency={client.currency} />
+            <div className="sm:col-span-2"><label className="label">Billing address (shown on invoices)</label><textarea name="address" rows={2} defaultValue={client.address ?? ""} className="input" /></div>
+            <div className="sm:col-span-2"><label className="label">Client tax ID (GSTIN / VAT, optional)</label><input name="tax_id" defaultValue={client.tax_id ?? ""} className="input" /></div>
             <div className="sm:col-span-2"><label className="label">Internal notes</label><textarea name="notes" rows={3} defaultValue={client.notes ?? ""} className="input" /></div>
             <p className="text-xs text-mute sm:col-span-2">Changing the billing currency only affects new invoices and services. Existing ones keep the currency they were created in.</p>
             <div className="sm:col-span-2"><button className="btn-primary">Save details</button></div>
@@ -323,42 +326,5 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
         ) : <p className="mt-4 text-xs text-mute">Only social media managers, managers and admins can create posts.</p>}
       </section>
     </>
-  );
-}
-
-/* ----------------------------------------------------------------- Billing (admin only) */
-async function Billing({ id, currency }: { id: string; currency: string }) {
-  const sb = await supabaseServer();
-  const { data: invoices } = await sb.from("invoices").select("*").eq("client_id", id).order("issued_at", { ascending: false });
-  const owed = totals((invoices ?? []).filter((i: any) => i.status === "due" || i.status === "overdue"));
-  const paid = totals((invoices ?? []).filter((i: any) => i.status === "paid"));
-  return (
-    <section className="card">
-      <div className="mb-4 grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-paper p-3"><p className="tag">Outstanding</p><Totals t={owed} className="text-xl font-bold leading-snug" /></div>
-        <div className="rounded-xl bg-paper p-3"><p className="tag">Paid to date</p><Totals t={paid} className="text-xl font-bold leading-snug text-forest" /></div>
-      </div>
-      <div className="space-y-2">
-        {(invoices ?? []).length === 0 && <Empty>No invoices yet.</Empty>}
-        {(invoices ?? []).map((i: any) => (
-          <div key={i.id} className="row flex-wrap">
-            <span>{i.period_label}</span>
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold">{money(i.amount, i.currency)}</span><span className={`pill ${statusPill(i.status)}`}>{i.status}</span>
-              {i.status === "draft" && <form action={sendDraftInvoiceAction}><input type="hidden" name="id" value={i.id} /><button className="text-xs font-medium text-forest hover:underline">Send to client</button></form>}
-              {i.status !== "paid" && i.status !== "draft" && <form action={markInvoicePaidAction}><input type="hidden" name="id" value={i.id} /><input type="hidden" name="client_id" value={id} /><button className="text-xs font-medium text-forest hover:underline">Mark paid</button></form>}
-            </span>
-          </div>
-        ))}
-      </div>
-      <form action={addInvoiceAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
-        <input type="hidden" name="client_id" value={id} />
-        <div><label className="label">Period</label><input name="period_label" placeholder="November 2026" className="input" /></div>
-        <div><label className="label">Amount</label><input name="amount" type="number" min="1" step="0.01" required className="input" /></div>
-        <div><label className="label">Currency</label><CurrencySelect defaultValue={currency} /></div>
-        <div className="flex items-end"><button className="btn-primary w-full">Add invoice</button></div>
-        <label className="flex items-center gap-2 text-sm sm:col-span-4"><input type="checkbox" name="draft" className="h-4 w-4 accent-forest" /> Save as draft (the client won't see it yet)</label>
-      </form>
-    </section>
   );
 }
