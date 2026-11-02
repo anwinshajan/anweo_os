@@ -278,7 +278,7 @@ export const createProjectAction = safe(async (form: FormData) => {
   const client_id = str(form, "client_id");
   const title = str(form, "title");
   if (!client_id || !title) throw new Error("Give the project a title");
-  const { error } = await sb.from("projects").insert({
+  const { data: proj, error } = await sb.from("projects").insert({
     client_id,
     title,
     description: str(form, "description") || null,
@@ -286,11 +286,39 @@ export const createProjectAction = safe(async (form: FormData) => {
     due_date: str(form, "due_date") || null,
     visible_to_client: form.get("visible") === "on",
     created_by: me.id,
-  });
-  if (error) throw new Error(error.message);
+  }).select("id").single();
+  if (error || !proj) throw new Error(error?.message ?? "Could not create the project");
   if (form.get("visible") === "on") await logEvent(sb, me.id, client_id, "project_created", `New project: ${title}`, true);
+
+  // Optional price (admin only): saved as a payment plan with an advance now and the rest on delivery.
+  const price = num(form, "price");
+  if (price > 0) {
+    if (!isAdminRole(me.role)) throw new Error("Project created, but only the admin can set its price");
+    const adv = Math.min(100, Math.max(0, Number(str(form, "advance") || 50)));
+    const parts = adv >= 100 ? [{ label: "Full payment", percent: 100, due: isoDay() }]
+      : adv <= 0 ? [{ label: "Payment on delivery", percent: 100, due: null as string | null }]
+      : [{ label: "Advance", percent: adv, due: isoDay() as string | null }, { label: "Final (on delivery)", percent: 100 - adv, due: null as string | null }];
+    const amounts = splitAmounts(price, parts.map((x) => x.percent));
+    const { data: plan, error: pErr } = await sb.from("payment_plans").insert({ client_id, project_id: proj.id, title, kind: "one_time", currency: cur(form, "currency"), total_amount: price, created_by: me.id }).select("id").single();
+    if (pErr || !plan) throw new Error(`Project created, but its price could not be saved: ${pErr?.message}`);
+    const { error: iErr } = await sb.from("plan_installments").insert(parts.map((x, n) => ({ plan_id: plan.id, label: x.label, percent: x.percent, amount: amounts[n], due_date: x.due, sort_order: n + 1 })));
+    if (iErr) { await sb.from("payment_plans").delete().eq("id", plan.id); throw new Error(`Project created, but its price could not be saved: ${iErr.message}`); }
+    await logEvent(sb, me.id, client_id, "plan_created", `Payment plan agreed: ${title}`, true);
+    await sb.rpc("run_billing", { p_include_manual: false });
+    revalidatePath("/finance"); revalidatePath("/transactions");
+  }
   revalidatePath(`/clients/${client_id}`);
 });
+
+// When a project is delivered, invoice the payments that were waiting for delivery (the ones with no date).
+async function invoiceOnDelivery(sb: Sb, projectId: string, isAdmin: boolean) {
+  const { data: plans } = await sb.from("payment_plans").select("id,plan_installments(id,invoice_id,due_date)").eq("project_id", projectId).eq("status", "active");
+  const ids = (plans ?? []).flatMap((p: any) => (p.plan_installments ?? []).filter((i: any) => !i.invoice_id && !i.due_date).map((i: any) => i.id as string));
+  if (ids.length === 0) return;
+  let client: Sb | ReturnType<typeof supabaseAdmin> = sb;
+  if (!isAdmin) { try { client = supabaseAdmin(); } catch { return; } }
+  for (const id of ids) await client.rpc("invoice_installment", { p_inst: id });
+}
 
 export const setProjectStatusAction = safe(async (form: FormData) => {
   const me = await requireStaff();
@@ -299,6 +327,7 @@ export const setProjectStatusAction = safe(async (form: FormData) => {
   if (!["planning", "in_progress", "review", "completed", "on_hold"].includes(status)) return;
   const { data: p, error } = await sb.from("projects").update({ status }).eq("id", str(form, "id")).select("client_id,title,visible_to_client").single();
   if (error || !p) throw new Error(error?.message ?? "Could not change the project status");
+  if (status === "completed") await invoiceOnDelivery(sb, str(form, "id"), isAdminRole(me.role));
   if (p && status === "completed") await logEvent(sb, me.id, p.client_id, "project_completed", `Project completed: ${p.title}`, p.visible_to_client);
   revalidatePath(`/clients/${str(form, "client_id")}`);
   revalidatePath("/");

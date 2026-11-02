@@ -13,6 +13,7 @@ const sql4 = mig("0004_phase2.sql");
 const sql6 = mig("0006_currencies.sql");
 const sql7 = mig("0007_payment_plans.sql");
 const sql8 = mig("0008_invoice_documents.sql");
+const sql9 = mig("0009_project_payment_link.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -31,6 +32,7 @@ await db.exec(sql4);
 await db.exec(sql6);
 await db.exec(sql7);
 await db.exec(sql8);
+await db.exec(sql9);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);

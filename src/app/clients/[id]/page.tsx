@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Form from "@/components/Form";
+import AddServiceForm from "@/components/AddServiceForm";
 import { notFound, redirect } from "next/navigation";
 import Shell, { Empty, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import UploadForm from "@/components/UploadForm";
@@ -49,16 +50,21 @@ export default async function ClientDetail({ params, searchParams }: { params: P
       <div className="space-y-5">
         <div>
           <Link href="/" className="tag hover:text-forest">← All clients</Link>
-          <div className="mt-3 flex flex-wrap items-center gap-4">
-            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-forest text-2xl font-bold text-lime">{client.business_name[0]?.toUpperCase()}</span>
+          <div className="mt-3 flex items-start gap-3 sm:gap-4">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-forest text-xl font-bold text-lime sm:h-14 sm:w-14 sm:text-2xl">{client.business_name[0]?.toUpperCase()}</span>
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-3xl font-bold tracking-tight sm:text-4xl">{client.business_name}{client.status === "archived" && <span className="pill ml-3 align-middle bg-charcoal/10 text-charcoal">archived</span>}</h1>
-              <p className="text-sm text-mute">{[client.contact_name, client.email, client.phone, client.country].filter(Boolean).join(" · ")} · <span className="font-mono text-[11px] text-forest">bills in {client.currency}</span></p>
+              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-4xl">{client.business_name}{client.status === "archived" && <span className="pill ml-3 align-middle bg-charcoal/10 text-charcoal">archived</span>}</h1>
+              <div className="mt-1 space-y-0.5 text-sm text-mute">
+                {client.contact_name && <p>{client.contact_name}{client.country ? ` · ${client.country}` : ""}</p>}
+                {client.email && <p className="break-all">{client.email}</p>}
+                {client.phone && <p>{client.phone}</p>}
+                <p className="font-mono text-[11px] text-forest">bills in {client.currency}</p>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              {lead && <div className="text-right"><p className="tag">Monthly</p><Totals t={monthly} className="text-xl font-bold leading-snug text-forest" /></div>}
-              <Link href={`/chat/c/${id}`} className="btn-lime">Open chat</Link>
-            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Link href={`/chat/c/${id}`} className="btn-lime">Open chat</Link>
+            {lead && <p className="text-sm text-mute">Monthly: {Object.keys(monthly).length ? <Totals t={monthly} className="inline font-bold text-forest" /> : <span className="font-medium text-ink/70">no monthly services yet</span>}</p>}
           </div>
         </div>
 
@@ -69,7 +75,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
         </nav>
 
         {tab === "overview" && <Overview id={id} client={client} lead={lead} />}
-        {tab === "projects" && <Projects id={id} />}
+        {tab === "projects" && <Projects id={id} admin={admin} client={client} />}
         {tab === "documents" && <Documents id={id} lead={lead} />}
         {tab === "work" && <WorkAndContent id={id} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
         {tab === "billing" && admin && <BillingTab id={id} client={client} />}
@@ -106,29 +112,8 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
             </div>
           ))}
         </div>
-        {lead && (
-          <Form action={assignServiceAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
-            <input type="hidden" name="client_id" value={id} />
-            <div className="sm:col-span-4">
-              <label className="label">Service and package</label>
-              <select name="choice" required className="input">
-                {(services ?? []).map((s: any) => (
-                  <optgroup key={s.id} label={s.name}>
-                    {(packages ?? []).filter((p: any) => p.service_id === s.id).map((p: any) => {
-                      const own = p.prices?.[client.currency];
-                      return <option key={p.id} value={`${s.id}:${p.id}`}>{p.name} · {own > 0 ? money(own, client.currency) : `${money(p.price_monthly, p.currency)} (no ${client.currency} price set)`}/mo</option>;
-                    })}
-                    <option value={`${s.id}:`}>Custom price</option>
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-            <div className="sm:col-span-2"><label className="label">Override price (optional)</label><input name="price_monthly" type="number" min="0" step="0.01" placeholder="Leave blank to use the package price" className="input" /></div>
-            <div><label className="label">Currency</label><CurrencySelect defaultValue={client.currency} /></div>
-            <div className="flex items-end"><button className="btn-primary w-full">Add service</button></div>
-            <p className="text-xs text-mute sm:col-span-4">Choosing “Custom price” needs a price above. Manage packages under Services.</p>
-          </Form>
-        )}
+        {lead && (services ?? []).length > 0 && <AddServiceForm clientId={id} currency={client.currency} services={services ?? []} packages={packages ?? []} />}
+        {lead && (services ?? []).length === 0 && <p className="mt-4 text-sm text-mute">No services set up yet. Add them under Services first.</p>}
       </section>
 
       {lead && (
@@ -158,9 +143,11 @@ async function Overview({ id, client, lead }: { id: string; client: any; lead: b
 }
 
 /* ----------------------------------------------------------------- Projects */
-async function Projects({ id }: { id: string }) {
+async function Projects({ id, admin, client }: { id: string; admin: boolean; client: any }) {
   const sb = await supabaseServer();
   const { data: projects } = await sb.from("projects").select("id,title,description,status,start_date,due_date,visible_to_client,milestones(id,title,done,due_date,sort_order)").eq("client_id", id).order("created_at", { ascending: false });
+  const { data: plans } = admin ? await sb.from("payment_plans").select("project_id,total_amount,currency,status,plan_installments(label,invoice_id,invoices(status))").not("project_id", "is", null).eq("client_id", id) : { data: [] as any[] };
+  const planOf = new Map((plans ?? []).map((pl: any) => [pl.project_id, pl]));
   return (
     <>
       <div className="space-y-4">
@@ -183,6 +170,14 @@ async function Projects({ id }: { id: string }) {
                 </Form>
               </div>
               {p.description && <p className="mt-2 text-sm text-ink/70">{p.description}</p>}
+              {admin && (() => {
+                const pl: any = planOf.get(p.id);
+                if (!pl) return <p className="mt-2 text-xs text-mute">No price set. <Link href={`/clients/${id}?tab=billing`} className="font-medium text-forest hover:underline">Add payments in Billing →</Link></p>;
+                const ins = pl.plan_installments ?? [];
+                const paid = ins.filter((i: any) => i.invoices?.status === "paid").length;
+                const sent = ins.filter((i: any) => i.invoice_id).length;
+                return <p className="mt-2 text-sm"><span className="font-semibold">{money(pl.total_amount, pl.currency)}</span> <span className="text-mute">· {paid} of {ins.length} paid · {sent} invoiced · </span><Link href={`/clients/${id}?tab=billing`} className="text-xs font-medium text-forest hover:underline">Billing →</Link></p>;
+              })()}
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-forest-soft"><div className="h-full rounded-full bg-lime-deep" style={{ width: `${pct}%` }} /></div>
               <p className="mt-1 font-mono text-[11px] text-mute">{pct}% complete</p>
               <ul className="mt-3 space-y-1.5">
@@ -215,6 +210,14 @@ async function Projects({ id }: { id: string }) {
           <div><label className="label">Start</label><input name="start_date" type="date" className="input" /></div>
           <div><label className="label">Due</label><input name="due_date" type="date" className="input" /></div>
           <div className="sm:col-span-4"><label className="label">What's included</label><textarea name="description" rows={2} className="input" /></div>
+          {admin && (
+            <div className="grid gap-3 rounded-xl bg-paper/70 p-3 sm:col-span-4 sm:grid-cols-4">
+              <div className="sm:col-span-4"><p className="font-semibold">Price (optional)</p><p className="text-xs text-mute">The advance is invoiced now. The rest is invoiced automatically when you mark the project completed.</p></div>
+              <div className="sm:col-span-2"><label className="label">Total price</label><input name="price" type="number" min="0" step="0.01" placeholder="e.g. 60000" className="input" /></div>
+              <div><label className="label">Currency</label><CurrencySelect short defaultValue={client.currency} /></div>
+              <div><label className="label">Advance</label><select name="advance" defaultValue="50" className="input"><option value="0">None, pay on delivery</option><option value="30">30% now</option><option value="50">50% now</option><option value="70">70% now</option><option value="100">100% now</option></select></div>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" name="visible" defaultChecked className="h-4 w-4 accent-forest" /> Show to the client</label>
           <div><button className="btn-primary w-full">Create project</button></div>
         </Form>

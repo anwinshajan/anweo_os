@@ -48,7 +48,7 @@ Clients and staff are in different countries, so money is handled per person and
 Everyone can see their own pay on **My pay**. Nobody except the admin can see anyone else's.
 
 ## Setup
-1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0008. Run 0003 on its own (it adds new role names).
+1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0009. Run 0003 on its own (it adds new role names).
 2. Supabase → Authentication → Sign In / Providers: enable Email, and turn **off** "Allow new users to sign up".
 3. Copy `.env.example` to `.env.local` and fill it in (see below).
 4. Create your own login in Supabase (Authentication → Users → Add user, tick auto-confirm), then run once in the SQL editor:
@@ -100,3 +100,7 @@ Limits: invoices show a tax number but do not calculate VAT/GST (add it into the
 ## Smoothness and errors
 
 Pages show a skeleton immediately while loading, forms lock their buttons while saving (no double submits), and every save shows a small confirmation. Server-side validation errors come back as a message toast instead of a broken page (production hides thrown messages, so actions return them).
+
+## Pricing a project
+
+When you create a project (Projects tab) the admin can enter a total price and an advance (none, 30, 50, 70 or 100 percent). The advance is invoiced straight away; the rest is invoiced automatically when the project is marked completed, and the client's payment window and weekly late fee then apply. Monthly services are priced in the Overview tab, where picking a package fills the price in.

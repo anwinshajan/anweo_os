@@ -45,3 +45,4 @@ main { animation: page-in .22s ease-out both; }
 a, button, .card, .row { transition-property: color, background-color, border-color, box-shadow, transform, opacity; transition-duration: .15s; transition-timing-function: ease; }
 html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+input[type="date"] { min-width: 0; max-width: 100%; }
