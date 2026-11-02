@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import Shell, { Empty, fmtDate, label, money, showTotals, statusPill, totals } from "@/components/Shell";
+import Shell, { Empty, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import UploadForm from "@/components/UploadForm";
 import CountryCurrency from "@/components/CountryCurrency";
 import CurrencySelect from "@/components/CurrencySelect";
@@ -54,7 +54,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
               <p className="text-sm text-mute">{[client.contact_name, client.email, client.phone, client.country].filter(Boolean).join(" · ")} · <span className="font-mono text-[11px] text-forest">bills in {client.currency}</span></p>
             </div>
             <div className="flex items-center gap-3">
-              {lead && <div className="text-right"><p className="tag">Monthly</p><p className="text-xl font-bold text-forest">{showTotals(monthly)}</p></div>}
+              {lead && <div className="text-right"><p className="tag">Monthly</p><Totals t={monthly} className="text-xl font-bold leading-snug text-forest" /></div>}
               <Link href={`/chat/c/${id}`} className="btn-lime">Open chat</Link>
             </div>
           </div>
@@ -335,8 +335,8 @@ async function Billing({ id, currency }: { id: string; currency: string }) {
   return (
     <section className="card">
       <div className="mb-4 grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-paper p-3"><p className="tag">Outstanding</p><p className="text-xl font-bold">{showTotals(owed)}</p></div>
-        <div className="rounded-xl bg-paper p-3"><p className="tag">Paid to date</p><p className="text-xl font-bold text-forest">{showTotals(paid)}</p></div>
+        <div className="rounded-xl bg-paper p-3"><p className="tag">Outstanding</p><Totals t={owed} className="text-xl font-bold leading-snug" /></div>
+        <div className="rounded-xl bg-paper p-3"><p className="tag">Paid to date</p><Totals t={paid} className="text-xl font-bold leading-snug text-forest" /></div>
       </div>
       <div className="space-y-2">
         {(invoices ?? []).length === 0 && <Empty>No invoices yet.</Empty>}

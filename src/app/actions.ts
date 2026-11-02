@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getMe, supabaseAdmin, supabaseServer } from "@/lib/supabase-server";
 import { STAFF_ROLES, isAdminRole, isLeadRole, type Role } from "@/lib/roles";
-import { BASE_CURRENCY, CURRENCIES, currencyForCountry, isCurrency, ratesFromGbpBase } from "@/lib/currency";
+import { BASE_CURRENCY, CURRENCIES, currencyForCountry, isCurrency } from "@/lib/currency";
 
 /* ------------------------------------------------------------------ guards */
 async function requireActive() {
@@ -623,48 +623,6 @@ export async function setAccountStatusAction(form: FormData) {
   if (!["active", "disabled"].includes(status)) return;
   await supabaseAdmin().from("profiles").update({ status }).eq("id", id);
   revalidatePath("/team");
-}
-
-/* ------------------------------------------------------------------ exchange rates (admin only) */
-// The admin types rates the natural way ("1 GBP = 111.50 INR"); we store pounds per unit.
-export async function saveRatesAction(form: FormData) {
-  await requireAdmin();
-  const sb = await supabaseServer();
-  const rows: { currency: string; gbp_per_unit: number; source: "manual"; updated_at: string }[] = [];
-  for (const c of CURRENCIES) {
-    if (c.code === BASE_CURRENCY) continue;
-    const raw = str(form, `rate_${c.code}`);
-    if (raw === "") continue;
-    const unitsPerPound = Number(raw);
-    if (!(unitsPerPound > 0) || !Number.isFinite(unitsPerPound)) throw new Error(`The ${c.code} rate must be a number above zero`);
-    rows.push({ currency: c.code, gbp_per_unit: 1 / unitsPerPound, source: "manual", updated_at: new Date().toISOString() });
-  }
-  if (rows.length === 0) return;
-  const { error } = await sb.from("fx_rates").upsert(rows, { onConflict: "currency" });
-  if (error) throw new Error(error.message);
-  revalidatePath("/finance");
-}
-
-export async function refreshRatesAction() {
-  await requireAdmin();
-  let json: unknown;
-  try {
-    const res = await fetch("https://open.er-api.com/v6/latest/GBP", { signal: AbortSignal.timeout(8000), cache: "no-store" });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    json = await res.json();
-  } catch {
-    throw new Error("Couldn't reach the live exchange-rate service. Type the rates in by hand instead.");
-  }
-  const rates = ratesFromGbpBase(json);
-  if (!rates) throw new Error("The exchange-rate service sent something unexpected. Type the rates in by hand instead.");
-  const sb = await supabaseServer();
-  const now = new Date().toISOString();
-  const { error } = await sb.from("fx_rates").upsert(
-    Object.entries(rates).map(([currency, gbp_per_unit]) => ({ currency, gbp_per_unit, source: "live", updated_at: now })),
-    { onConflict: "currency" }
-  );
-  if (error) throw new Error(error.message);
-  revalidatePath("/finance");
 }
 
 /* ------------------------------------------------------------------ account */

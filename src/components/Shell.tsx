@@ -111,8 +111,22 @@ export function totals(rows: { amount?: number | string; price_monthly?: number 
   for (const r of rows) t[r.currency] = (t[r.currency] ?? 0) + Number(r.amount ?? r.price_monthly ?? 0);
   return t;
 }
+const byCurrency = (t: Record<string, number>) =>
+  Object.keys(t).sort((a, b) => (a === "GBP" ? -1 : b === "GBP" ? 1 : a.localeCompare(b)));
+
+// One line of text, currencies kept apart: "£150.00 · ₹42,000.00". Nothing is converted or added together.
 export const showTotals = (t: Record<string, number>) => {
-  const keys = Object.keys(t);
-  if (keys.length === 0) return money(0);
-  return keys.sort((a, b) => (a === "GBP" ? -1 : b === "GBP" ? 1 : a.localeCompare(b))).map((c) => money(t[c], c)).join(" + ");
+  const keys = byCurrency(t);
+  return keys.length === 0 ? money(0) : keys.map((c) => money(t[c], c)).join(" · ");
 };
+
+// Each currency on its own line. Use this for big numbers.
+export function Totals({ t, className = "" }: { t: Record<string, number>; className?: string }) {
+  const keys = byCurrency(t);
+  if (keys.length === 0) return <div className={className}>{money(0)}</div>;
+  return (
+    <div className={className}>
+      {keys.map((c) => <div key={c}>{money(t[c], c)}</div>)}
+    </div>
+  );
+}

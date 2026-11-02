@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import Shell, { Empty, PageHead, fmtDate, label, money, showTotals, statusPill, totals } from "@/components/Shell";
+import Shell, { Empty, PageHead, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import { Corner, Logo } from "@/components/Logo";
 import { signDocumentAction } from "./actions";
 import { getMe, supabaseServer, type Me } from "@/lib/supabase-server";
@@ -60,7 +60,7 @@ async function StaffHome({ me, q, archived }: { me: Me; q: string; archived: boo
         <Stat tag="Needs approval" value={String(pending ?? 0)} href="/approvals" hot={(pending ?? 0) > 0} />
         <Stat tag="My open tasks" value={String(myTasks ?? 0)} href="/tasks" />
         {admin ? (
-          <Stat tag="Outstanding" value={showTotals(totals(due ?? []))} href="/finance" hot={(due ?? []).length > 0} green />
+          <Stat tag="Outstanding" value={<Totals t={totals(due ?? [])} />} href="/finance" hot={(due ?? []).length > 0} green />
         ) : (
           <Stat tag="Active services" value={String(lead ? (subs?.length ?? 0) : "-")} />
         )}
@@ -100,11 +100,11 @@ async function StaffHome({ me, q, archived }: { me: Me; q: string; archived: boo
   );
 }
 
-function Stat({ tag, value, href, hot, green }: { tag: string; value: string; href?: string; hot?: boolean; green?: boolean }) {
+function Stat({ tag, value, href, hot, green }: { tag: string; value: React.ReactNode; href?: string; hot?: boolean; green?: boolean }) {
   const body = (
     <div className={`${green ? "card-green" : "card"} !p-4 ${hot ? "ring-2 ring-lime" : ""} h-full`}>
       <p className={`tag ${green ? "!text-lime" : ""}`}>{tag}</p>
-      <p className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">{value}</p>
+      <div className="mt-2 text-2xl font-bold leading-snug tracking-tight sm:text-3xl">{value}</div>
     </div>
   );
   return href ? <Link href={href}>{body}</Link> : body;
@@ -148,9 +148,9 @@ async function ClientPortal({ me }: { me: Me }) {
           <p className="tag !text-lime">[ Your workspace ]</p>
           <h1 className="mt-2 max-w-[85%] text-3xl font-bold leading-[1.05] tracking-tight sm:max-w-md sm:text-4xl">{client?.business_name}</h1>
           <div className="mt-6 flex flex-wrap items-end gap-x-8 gap-y-3">
-            <div><p className="tag !text-paper/60">Your plan</p><p className="text-2xl font-bold">{showTotals(total)}<span className="text-sm font-medium text-paper/60"> / month</span></p></div>
+            <div><p className="tag !text-paper/60">Your plan</p><Totals t={total} className="text-2xl font-bold leading-snug" /><p className="text-sm font-medium text-paper/60">per month</p></div>
             <div><p className="tag !text-paper/60">Active services</p><p className="text-2xl font-bold">{activeSubs.length}</p></div>
-            {hasOwed && <div><p className="tag !text-lime">Payment due</p><p className="text-2xl font-bold text-lime">{showTotals(owed)}</p></div>}
+            {hasOwed && <div><p className="tag !text-lime">Payment due</p><Totals t={owed} className="text-2xl font-bold leading-snug text-lime" /></div>}
           </div>
           <div className="mt-6 flex flex-wrap gap-2">
             <Link href="/chat" className="btn-lime">Chat with the team</Link>

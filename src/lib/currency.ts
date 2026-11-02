@@ -1,6 +1,6 @@
 // Currencies, countries and exchange-rate maths. Safe to import from client and server code.
 
-export const BASE_CURRENCY = "GBP"; // the currency company totals are reported in
+export const BASE_CURRENCY = "GBP"; // the default when nothing else is chosen. Money is never converted between currencies.
 
 export const CURRENCIES = [
   { code: "GBP", name: "British pound", locale: "en-GB" },
@@ -46,35 +46,3 @@ export function formatMoney(n: number | string, currency: string): string {
     return `${currency} ${value.toFixed(2)}`;
   }
 }
-
-// Rates are stored as "pounds per 1 unit" (gbp_per_unit), e.g. INR 0.0090.
-export type Rates = Record<string, number>;
-
-// Add up amounts that are in different currencies, expressed in pounds.
-// Currencies with no rate are left out and reported, never guessed.
-export function toBase(totalsByCurrency: Record<string, number>, rates: Rates): { total: number; missing: string[] } {
-  let total = 0;
-  const missing: string[] = [];
-  for (const [cur, amount] of Object.entries(totalsByCurrency)) {
-    if (cur === BASE_CURRENCY) total += amount;
-    else if (rates[cur] > 0) total += amount * rates[cur];
-    else missing.push(cur);
-  }
-  return { total, missing };
-}
-
-// Live providers quote "units of X per 1 GBP". Convert that to our "GBP per 1 unit".
-export function ratesFromGbpBase(json: unknown): Rates | null {
-  const j = json as { result?: string; base_code?: string; rates?: Record<string, unknown> } | null;
-  if (!j || j.result !== "success" || j.base_code !== "GBP" || !j.rates || typeof j.rates !== "object") return null;
-  const out: Rates = {};
-  for (const c of CURRENCIES) {
-    if (c.code === BASE_CURRENCY) continue;
-    const unitsPerGbp = Number(j.rates[c.code]);
-    if (Number.isFinite(unitsPerGbp) && unitsPerGbp > 0) out[c.code] = 1 / unitsPerGbp;
-  }
-  return Object.keys(out).length ? out : null;
-}
-
-// "How many X for £1" is the natural way to read and type a rate.
-export const unitsPerGbp = (gbpPerUnit: number) => (gbpPerUnit > 0 ? 1 / gbpPerUnit : 0);

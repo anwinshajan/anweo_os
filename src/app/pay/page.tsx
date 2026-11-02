@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import Shell, { Empty, PageHead, fmtDate, money, showTotals, statusPill, totals } from "@/components/Shell";
+import Shell, { Empty, PageHead, Totals, fmtDate, money, statusPill, totals } from "@/components/Shell";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +18,8 @@ export default async function MyPay() {
     <Shell me={me}>
       <PageHead tag="Private" title="My pay" sub="Only you and the founder can see this." />
       <div className="mb-6 grid grid-cols-2 gap-3">
-        <div className="card-green !p-4"><p className="tag !text-lime">On the way</p><p className="mt-2 text-2xl font-bold">{showTotals(pending)}</p></div>
-        <div className="card !p-4"><p className="tag">Paid to date</p><p className="mt-2 text-2xl font-bold">{showTotals(paid)}</p></div>
+        <div className="card-green !p-4"><p className="tag !text-lime">On the way</p><Totals t={pending} className="mt-2 text-2xl font-bold leading-snug" /></div>
+        <div className="card !p-4"><p className="tag">Paid to date</p><Totals t={paid} className="mt-2 text-2xl font-bold leading-snug" /></div>
       </div>
       <div className="space-y-2">
         {(pay ?? []).length === 0 && <Empty>No pay records yet.</Empty>}
