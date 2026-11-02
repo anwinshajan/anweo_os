@@ -31,7 +31,8 @@ export function supabaseAdmin() {
   );
 }
 
-export type Role = "admin" | "manager" | "developer" | "client";
+import type { Role } from "./roles";
+export type { Role } from "./roles";
 
 export interface Me {
   id: string;
@@ -41,6 +42,8 @@ export interface Me {
   status: "pending" | "active" | "disabled";
   client_id: string | null;
   can_manage_social: boolean;
+  job_title: string | null;
+  phone: string | null;
 }
 
 export async function getMe(): Promise<Me | null> {
@@ -49,7 +52,7 @@ export async function getMe(): Promise<Me | null> {
   if (!auth.user) return null;
   const { data } = await sb
     .from("profiles")
-    .select("id,email,full_name,role,status,client_id,can_manage_social")
+    .select("id,email,full_name,role,status,client_id,can_manage_social,job_title,phone")
     .eq("id", auth.user.id)
     .single();
   return (data as Me) ?? null;

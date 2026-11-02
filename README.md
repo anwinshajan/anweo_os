@@ -1,54 +1,68 @@
-# Anweo OS — Phase 1
+# Anweo OS
 
-Login system, role-based dashboards, service selection and client portal.
-Next.js 14 + Supabase. Installable on Android and iPhone as a web app (PWA).
+Client portal and team workspace for Anweo. Next.js 16 + Supabase. Installs as an app on Android and iPhone.
 
 ## What's inside
-- **Brand:** built from the Anweo brand sheet: forest green `#0E5A44`, lime `#C9F25A`, ink, off-white, rounded-square logo.
-- **Clients:** search, add, see services, work, content and billing at a glance.
-- **Services & packages:** managers create services and packages with prices and feature lists. Picking a package fills in the price.
-- **Approvals:** content queue with approve / reject / mark as posted.
-- **Client portal:** plan and monthly total, next post, work progress, upcoming and published content, billing, and a history timeline.
-- **History is private by default:** clients only see events deliberately marked client-visible.
-- **Installable:** works as an app on Android and iPhone.
+**For the team**
+- **Clients:** add, edit, search and archive clients. Each client has tabs for Overview, Projects, Documents, Work & content, and Billing (admin only).
+- **Services & packages:** managers create packages with prices and features. Picking a package fills in the price.
+- **Projects & milestones:** progress bars the client can see.
+- **Documents & contracts:** private file storage. Share a contract and the client can read it and accept it with their name (recorded with a timestamp).
+- **Tasks:** assign work to people. Everyone has a "My tasks" page.
+- **Content approvals:** social media managers draft, a manager or admin approves, then it is marked as posted.
+- **Chat:** one thread per client (the whole team can reply), a staff-only team channel, and **Anweo AI**.
+- **Finance (admin only):** monthly recurring revenue, pending client payments, expenses, payroll, and net for the month.
+- **My pay:** every team member sees only their own pay.
+
+**For clients**
+Their plan and monthly total, projects with progress, work, upcoming and published content, contracts to accept, documents, billing history, a live history timeline, chat with the team, and Anweo AI.
 
 ## Roles
-| Role | Can do |
+| Role | Access |
 |---|---|
-| **Admin / Founder** | Everything, including creating and disabling logins |
-| **Manager** | Clients, services and prices, billing, approvals |
-| **Developer** | See clients and work, add tasks. Cannot see prices or invoices. Can create posts only if an admin enables "social access" |
-| **Client** | Sees only their own services, upcoming posts, work, posted history and billing |
+| **Admin / Founder** | Everything, including Finance, payroll and creating logins |
+| **Manager** | Clients, services and packages, projects, contracts, approvals. No invoices, finance or payroll |
+| **Social media manager** | Creates posts, marks approved posts as posted. Cannot approve |
+| **Developer, Designer, Marketing** | See clients, work on tasks and projects, upload assets, chat. No prices, invoices or finance |
+| **Client** | Only their own business, and only what the team has shared |
 
-New sign-ups can never become admin. Accounts are created by an admin under **Team**.
+Everyone can see their own pay on **My pay**. Nobody except the admin can see anyone else's.
 
-## Setup (about 10 minutes)
-The Supabase project `anweo-os` (London) is already created and the database is loaded.
-1. Copy `.env.example` to `.env.local`. The URL and public key are filled in. Paste the **secret key** from Supabase → Project Settings → API Keys.
-2. In Supabase → **Authentication → Sign In / Providers → Email**, turn **off** "Allow new users to sign up" so nobody can self-register.
-3. Create your own login: **Authentication → Users → Add user** (tick auto-confirm), then run this once in the **SQL editor**, using your email:
-
+## Setup
+1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001, 0002, 0003, 0004, 0005. Run 0003 on its own (it adds new role names).
+2. Supabase → Authentication → Sign In / Providers: enable Email, and turn **off** "Allow new users to sign up".
+3. Copy `.env.example` to `.env.local` and fill it in (see below).
+4. Create your own login in Supabase (Authentication → Users → Add user, tick auto-confirm), then run once in the SQL editor:
 ```sql
-update public.profiles
-set role = 'admin', status = 'active', full_name = 'Anwin Shajan'
-where email = 'YOUR-EMAIL';
+update public.profiles set role = 'admin', status = 'active', full_name = 'Your Name' where email = 'YOUR-EMAIL';
 ```
-4. `npm install` then `npm run dev`, open http://localhost:3000 and sign in.
-5. Under **Team**, create logins for your manager, developers and clients. Under **Clients**, add a client and pick their services.
+5. `npm install`, then `npm run dev`. On Windows PowerShell use `npm.cmd`.
+
+## Environment variables
+| Name | What for | Secret? |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL | No |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase public key | No |
+| `SUPABASE_SERVICE_ROLE_KEY` | Creating logins and private file access | **Yes** |
+| `ANTHROPIC_API_KEY` | Switches on Anweo AI | **Yes** |
+| `ANTHROPIC_MODEL` | Optional. Defaults to `claude-sonnet-5-5` | No |
+
+Never prefix the secret ones with `NEXT_PUBLIC_`. Without `ANTHROPIC_API_KEY` everything works except Anweo AI, which shows a friendly "not switched on yet" message.
 
 ## Deploy
-Push to GitHub, import into Vercel, and add the three environment variables.
-Never expose `SUPABASE_SERVICE_ROLE_KEY` to the browser; it is only read in server code.
+Push to GitHub and import into Vercel. Add the variables above under Settings → Environment Variables. Mark the two secrets as **Sensitive**, then redeploy.
 
 ## Install on phones
-- **Android:** open the site in Chrome → menu → *Install app* (a PWA; an APK wrapper can be added later).
-- **iPhone:** open in Safari → Share → *Add to Home Screen*.
+- **Android:** open the site in Chrome, menu, **Install app**.
+- **iPhone:** open in Safari, Share, **Add to Home Screen**.
+
+## Security notes
+- Row-level security is on for every table. Clients can only ever read their own data, and a contract can only be accepted by the client it belongs to.
+- Invoices, expenses and payroll are visible to the admin only. Clients see their own non-draft invoices.
+- Approving a post cannot be done by anyone below manager, even by calling the API directly.
+- Files are in a private bucket. The server checks the database permission first, then hands out a 60-second link.
+- Anweo AI reads data with the signed-in person's own access, so it can never see more than they can. It is rate limited to 30 questions an hour per person and cannot change anything.
+- 95 automated database checks cover all of this. Run them any time with `npm run test:db`, and always after changing a migration.
 
 ## Branding
-All colours live in `tailwind.config.ts`. Replace the `brand`, `gold`, `ink` values with the Anweo brand sheet and the whole app updates.
-
-## Posting
-Phase 1 is semi-manual: staff create content, a manager approves, then someone posts and taps **Mark as posted**. The client sees the status live.
-
-## Tests
-The database rules were verified with 39 automated checks (client isolation, private history, no privilege escalation, developer and package limits). Run the SQL in `supabase/migrations/` in order: 0001, then 0002.
+Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141413`, paper `#F4F3EF`).

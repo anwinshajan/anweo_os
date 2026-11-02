@@ -1,42 +1,68 @@
 import Link from "next/link";
 import { signOutAction } from "@/app/actions";
 import type { Me } from "@/lib/supabase-server";
+import { roleLabel, isAdminRole, isLeadRole } from "@/lib/roles";
 import { Logo } from "./Logo";
 import { BottomNav, TopNav, type NavItem } from "./NavLinks";
 
-const roleLabel: Record<string, string> = { admin: "Founder", manager: "Manager", developer: "Developer", client: "Client" };
+// Everything a person can open, by role. Used for the desktop menu and the "More" page.
+export function navFor(me: Me): NavItem[] {
+  if (me.role === "client") {
+    return [
+      { href: "/", label: "Home", icon: "home" },
+      { href: "/chat", label: "Chat", icon: "chat" },
+      { href: "/chat/ai", label: "Anweo AI", icon: "ai" },
+      { href: "/account", label: "Account", icon: "account" },
+    ];
+  }
+  const lead = isLeadRole(me.role);
+  const admin = isAdminRole(me.role);
+  return [
+    { href: "/", label: "Clients", icon: "clients" },
+    { href: "/tasks", label: "Tasks", icon: "tasks" },
+    { href: "/chat", label: "Chat", icon: "chat" },
+    { href: "/approvals", label: "Approvals", icon: "approvals" },
+    ...(lead ? [{ href: "/catalogue", label: "Services", icon: "catalogue" } as NavItem] : []),
+    ...(admin ? [{ href: "/finance", label: "Finance", icon: "finance" } as NavItem] : []),
+    ...(admin ? [{ href: "/team", label: "Team", icon: "team" } as NavItem] : []),
+    ...(!admin ? [{ href: "/pay", label: "My pay", icon: "pay" } as NavItem] : []),
+  ];
+}
 
 export default function Shell({ me, children }: { me: Me; children: React.ReactNode }) {
   const staff = me.role !== "client";
-  const lead = me.role === "admin" || me.role === "manager";
-  const items: NavItem[] = staff
+  const all = navFor(me);
+  const bottom: NavItem[] = staff
     ? [
         { href: "/", label: "Clients", icon: "clients" },
+        { href: "/tasks", label: "Tasks", icon: "tasks" },
+        { href: "/chat", label: "Chat", icon: "chat" },
         { href: "/approvals", label: "Approvals", icon: "approvals" },
-        ...(lead ? [{ href: "/catalogue", label: "Services", icon: "catalogue" } as NavItem] : []),
-        ...(me.role === "admin" ? [{ href: "/team", label: "Team", icon: "team" } as NavItem] : []),
+        { href: "/more", label: "More", icon: "more" },
       ]
-    : [];
+    : all;
   const initial = (me.full_name || me.email || "A").trim()[0]?.toUpperCase();
 
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-edge bg-paper/90 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
           <Link href="/" aria-label="Anweo home"><Logo /></Link>
-          <TopNav items={items} />
+          <TopNav items={all} />
           <div className="flex items-center gap-2.5">
-            <div className="hidden text-right leading-tight sm:block">
-              <p className="max-w-[160px] truncate text-sm font-semibold">{me.full_name || me.email}</p>
-              <p className="tag !text-[9.5px] !text-forest">{roleLabel[me.role]}</p>
-            </div>
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-lime text-sm font-bold text-ink">{initial}</span>
+            <Link href="/account" className="flex items-center gap-2.5" aria-label="My account">
+              <div className="hidden text-right leading-tight sm:block">
+                <p className="max-w-[160px] truncate text-sm font-semibold">{me.full_name || me.email}</p>
+                <p className="tag !text-[9.5px] !text-forest">{me.job_title || roleLabel[me.role]}</p>
+              </div>
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-lime text-sm font-bold text-ink">{initial}</span>
+            </Link>
             <form action={signOutAction}><button className="btn-ghost !px-3 !py-1.5 text-xs">Sign out</button></form>
           </div>
         </div>
       </header>
-      <main className={`mx-auto max-w-5xl px-4 pt-6 sm:px-6 ${staff ? "pb-28 md:pb-16" : "pb-16"}`}>{children}</main>
-      {staff && <BottomNav items={items} />}
+      <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-16">{children}</main>
+      <BottomNav items={bottom} />
     </div>
   );
 }
@@ -50,10 +76,10 @@ export const statusPill = (s: string) => {
   const warn = "bg-amber-100 text-amber-800";
   const bad = "bg-red-50 text-red-700";
   const map: Record<string, string> = {
-    done: good, posted: good, paid: good, active: good,
-    in_progress: prog, scheduled: prog, approved: prog,
-    review: warn, awaiting_approval: warn, due: warn, paused: warn, pending: warn,
-    overdue: bad, rejected: bad, cancelled: bad, disabled: bad, void: bad,
+    done: good, posted: good, paid: good, active: good, completed: good, signed: good,
+    in_progress: prog, scheduled: prog, approved: prog, sent: prog, planning: prog,
+    review: warn, awaiting_approval: warn, due: warn, paused: warn, pending: warn, on_hold: warn,
+    overdue: bad, rejected: bad, cancelled: bad, disabled: bad, void: bad, archived: bad,
   };
   return map[s] ?? "bg-charcoal/10 text-charcoal";
 };
@@ -75,3 +101,18 @@ export function PageHead({ tag, title, sub, children }: { tag?: string; title: s
 export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="rounded-xl border border-dashed border-edge px-4 py-6 text-center text-sm text-mute">{children}</p>;
 }
+
+export const fmtDate = (d: string | null | undefined, withTime = false) =>
+  d ? new Date(d).toLocaleString("en-GB", withTime ? { dateStyle: "medium", timeStyle: "short" } : { dateStyle: "medium" }) : "";
+
+// Group amounts by currency so GBP and INR are never added together.
+export function totals(rows: { amount?: number | string; price_monthly?: number | string; currency: string }[]) {
+  const t: Record<string, number> = {};
+  for (const r of rows) t[r.currency] = (t[r.currency] ?? 0) + Number(r.amount ?? r.price_monthly ?? 0);
+  return t;
+}
+export const showTotals = (t: Record<string, number>) => {
+  const keys = Object.keys(t);
+  if (keys.length === 0) return money(0);
+  return keys.sort((a, b) => (a === "GBP" ? -1 : b === "GBP" ? 1 : a.localeCompare(b))).map((c) => money(t[c], c)).join(" + ");
+};

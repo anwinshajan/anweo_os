@@ -10,6 +10,7 @@ export default async function Approvals() {
   if (!me) redirect("/login");
   if (me.status !== "active" || me.role === "client") redirect("/");
   const lead = me.role === "admin" || me.role === "manager";
+  const social = lead || me.role === "social_manager" || me.can_manage_social;
   const sb = await supabaseServer();
 
   const [{ data: waiting }, { data: ready }] = await Promise.all([
@@ -21,7 +22,7 @@ export default async function Approvals() {
   return (
     <Shell me={me}>
       <PageHead tag="Content" title="Approvals" sub="Review what the team prepared. Approve it, then post it and mark it as posted so the client sees it." />
-      {!lead && <p className="mb-5 rounded-xl bg-forest-soft px-4 py-3 text-sm text-forest">Only admins and managers can approve posts. You can see the queue below.</p>}
+      {!lead && <p className="mb-5 rounded-xl bg-forest-soft px-4 py-3 text-sm text-forest">Only admins and managers can approve posts. {social ? "Once a post is approved, you can mark it as posted." : "You can see the queue below."}</p>}
 
       <section className="mb-8">
         <p className="tag mb-3">[ Waiting for approval · {waiting?.length ?? 0} ]</p>
@@ -59,7 +60,7 @@ export default async function Approvals() {
               </div>
               {p.caption && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-paper px-3.5 py-3 text-sm text-ink/85">{p.caption}</p>}
               <p className="mt-2 font-mono text-[11px] text-mute">{p.kind} · {p.platform} · {when(p.scheduled_at)}</p>
-              {lead && (
+              {social && (
                 <form action={reviewPostAction} className="mt-4">
                   <input type="hidden" name="id" value={p.id} />
                   <button name="decision" value="posted" className="btn-lime">Mark as posted</button>
