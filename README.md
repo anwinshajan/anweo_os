@@ -63,11 +63,13 @@ update public.profiles set role = 'admin', status = 'active', full_name = 'Your 
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL | No |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase public key | No |
 | `SUPABASE_SERVICE_ROLE_KEY` | Creating logins and private file access | **Yes** |
-| `ANTHROPIC_API_KEY` | Switches on Anweo AI | **Yes** |
-| `ANTHROPIC_MODEL` | Optional. Defaults to `claude-sonnet-5-5` | No |
+| `AI_BASE_URL` | Your AI router's OpenAI-compatible base URL (the app calls `<base>/chat/completions`) | For Anweo AI |
+| `AI_API_KEY` | Your router API key | For Anweo AI |
+| `AI_MODEL` | The model ID to use | For Anweo AI |
+| `ANTHROPIC_API_KEY` | Optional alternative: Anthropic directly, if the three above are not set | No |
 | `CRON_SECRET` | Lets only Vercel's daily job run billing. Any long random string | **Yes** |
 
-Never prefix the secret ones with `NEXT_PUBLIC_`. Without `ANTHROPIC_API_KEY` everything works except Anweo AI, which shows a friendly "not switched on yet" message.
+Never prefix the secret ones with `NEXT_PUBLIC_`. Without the AI variables everything works except Anweo AI, which shows a friendly "not switched on yet" message.
 
 ## Deploy
 Push to GitHub and import into Vercel. Add the variables above under Settings → Environment Variables. Mark the two secrets as **Sensitive**, then redeploy.

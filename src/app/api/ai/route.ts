@@ -75,9 +75,14 @@ export async function POST(req: Request) {
   const me = await getMe();
   if (!me || me.status !== "active") return NextResponse.json({ error: "Please sign in again." }, { status: 401 });
 
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) {
-    return NextResponse.json({ error: "Anweo AI isn't switched on yet. The admin needs to add the ANTHROPIC_API_KEY in Vercel." }, { status: 503 });
+  // Any OpenAI-compatible router (set AI_BASE_URL, AI_API_KEY, AI_MODEL). Anthropic's own API still works if only ANTHROPIC_API_KEY is set.
+  const routerKey = process.env.AI_API_KEY;
+  const routerBase = (process.env.AI_BASE_URL ?? "").replace(/\/+$/, "");
+  const routerModel = process.env.AI_MODEL;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const useRouter = !!(routerKey && routerBase && routerModel);
+  if (!useRouter && !anthropicKey) {
+    return NextResponse.json({ error: "Anweo AI isn't switched on yet. The admin needs to add AI_BASE_URL, AI_API_KEY and AI_MODEL in Vercel." }, { status: 503 });
   }
 
   let message = "";
@@ -112,26 +117,38 @@ export async function POST(req: Request) {
   await sb.from("ai_messages").insert({ role: "user", content: message });
 
   let reply = "";
+  const turns = [...history.map((h) => ({ role: h.role, content: h.content })), { role: "user", content: message }];
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
-        max_tokens: 700,
-        system,
-        messages: [...history.map((h) => ({ role: h.role, content: h.content })), { role: "user", content: message }],
-      }),
-      signal: AbortSignal.timeout(50_000),
-    });
-    if (!res.ok) {
-      console.error("anthropic error", res.status, (await res.text()).slice(0, 300));
-      return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
+    if (useRouter) {
+      const res = await fetch(`${routerBase}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${routerKey}` },
+        body: JSON.stringify({ model: routerModel, max_tokens: 700, messages: [{ role: "system", content: system }, ...turns] }),
+        signal: AbortSignal.timeout(50_000),
+      });
+      if (!res.ok) {
+        console.error("ai router error", res.status, (await res.text()).slice(0, 300));
+        return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
+      }
+      const data = await res.json();
+      const c = data.choices?.[0]?.message?.content;
+      reply = (typeof c === "string" ? c : Array.isArray(c) ? c.map((x: { text?: string }) => x.text ?? "").join("") : "").trim();
+    } else {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": anthropicKey!, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5", max_tokens: 700, system, messages: turns }),
+        signal: AbortSignal.timeout(50_000),
+      });
+      if (!res.ok) {
+        console.error("anthropic error", res.status, (await res.text()).slice(0, 300));
+        return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
+      }
+      const data = await res.json();
+      reply = (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("\n").trim();
     }
-    const data = await res.json();
-    reply = (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("\n").trim();
   } catch (e) {
-    console.error("anthropic request failed", e);
+    console.error("ai request failed", e);
     return NextResponse.json({ error: "Anweo AI took too long. Please try again." }, { status: 504 });
   }
   if (!reply) return NextResponse.json({ error: "I didn't get an answer back. Please try again." }, { status: 502 });
