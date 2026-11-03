@@ -2,6 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { formatMoney } from "@/lib/currency";
+import { pickAssignee } from "@/lib/automation";
+import { dueDateFor } from "@/lib/recurrence";
 import { adminIds, clientUserIds, leadIds, notifyUsers, snip, staffIds } from "@/lib/notify";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -548,13 +550,18 @@ export const reviewPostAction = safe(async (form: FormData) => {
   const patch: Record<string, unknown> = { status: next };
   if (next === "approved") patch.approved_by = me.id;
   if (next === "approved" || next === "rejected") { patch.reviewed_by = me.id; patch.reviewed_at = new Date().toISOString(); patch.review_note = str(form, "note") || null; }
-  if (next === "posted") patch.posted_at = new Date().toISOString();
+  if (next === "posted") { patch.posted_at = new Date().toISOString(); const u = str(form, "post_url"); if (/^https?:\/\//i.test(u)) patch.post_url = u.slice(0, 400); }
   const { data: p, error } = await sb.from("social_posts").update(patch).eq("id", id).select("client_id,kind,platform,title,caption,created_by").single();
   if (error) throw new Error(error.message);
   if (p) {
     const label = snip(p.title || p.caption || `${p.kind} for ${p.platform}`, 70);
     const note = str(form, "note");
     if (next === "approved") later(async () => {
+      // The system hands out the "publish it" job: to the least busy person on the social team.
+      const who2 = (await pickAssignee(["social_manager", "marketing", "designer"])) ?? p.created_by;
+      const { data: when } = await supabaseAdmin().from("social_posts").select("scheduled_at").eq("id", id).single();
+      await supabaseAdmin().from("work_items").insert({ client_id: p.client_id, title: `Publish: ${label}`, assignee: who2, due_date: (when?.scheduled_at ?? new Date(Date.now() + 86_400_000).toISOString()).slice(0, 10), visible_to_client: false, auto_created: true });
+      await notifyUsers([who2], { title: "New task: publish approved content", body: label, url: "/tasks" }, me.id);
       await notifyUsers([p.created_by], { title: "Your content was approved", body: label, url: `/studio/${id}` }, me.id);
       await notifyUsers(await clientUserIds(p.client_id), { title: "New content is ready for you", body: label, url: "/" });
     });
@@ -1423,4 +1430,199 @@ export const deleteHistoryEntryAction = safe(async (form: FormData) => {
   const { data, error } = await sb.from("activity_log").delete().eq("id", id).select("client_id").single();
   if (error || !data) throw new Error(error?.message ?? "Entry not found");
   revalidatePath(`/clients/${data.client_id}`); revalidatePath("/");
+});
+
+/* ------------------------------------------------------------ marketing: brand kit, accounts, results */
+const PLATFORMS = ["instagram", "facebook", "youtube", "linkedin", "tiktok", "whatsapp", "google_business", "other"];
+const clip = (f: FormData, k: string, n: number) => str(f, k).slice(0, n) || null;
+
+export const saveBrandAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  if (!client_id) throw new Error("Client missing");
+  const { error } = await sb.from("client_brand").upsert({
+    client_id, tagline: clip(form, "tagline", 200), tone: clip(form, "tone", 400), audience: clip(form, "audience", 600), colors: clip(form, "colors", 300),
+    fonts: clip(form, "fonts", 200), hashtags: clip(form, "hashtags", 500), goals: clip(form, "goals", 800), dont: clip(form, "dont", 600), assets_link: clip(form, "assets_link", 300),
+    updated_by: me.id, updated_at: new Date().toISOString(),
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${client_id}`);
+});
+
+export const addSocialAccountAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const platform = PLATFORMS.includes(str(form, "platform")) ? str(form, "platform") : "other";
+  const handle = str(form, "handle");
+  if (!client_id || !handle) throw new Error("Enter the account name or handle");
+  const url = str(form, "url");
+  if (url && !/^https?:\/\//i.test(url)) throw new Error("The link should start with https://");
+  const { error } = await sb.from("social_accounts").insert({ client_id, platform, handle: handle.slice(0, 120), url: url || null });
+  if (error) throw new Error(error.code === "23505" ? "That account is already added" : error.message);
+  revalidatePath(`/clients/${client_id}`); revalidatePath("/");
+});
+
+export const deleteSocialAccountAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const { error } = await sb.from("social_accounts").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`); revalidatePath("/");
+});
+
+const intOrNull = (f: FormData, k: string) => { const v = str(f, k); if (v === "") return null; const n = Math.round(Number(v)); if (!Number.isFinite(n) || n < 0) throw new Error("Numbers must be zero or more"); return n; };
+
+export const saveMetricsAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const month = str(form, "month");
+  if (!client_id || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Pick the month");
+  const spend = str(form, "ad_spend");
+  const row = {
+    client_id, period: `${month}-01`, platform: str(form, "platform") || "all",
+    followers: intOrNull(form, "followers"), reach: intOrNull(form, "reach"), impressions: intOrNull(form, "impressions"), engagement: intOrNull(form, "engagement"),
+    ad_spend: spend === "" ? null : Math.max(0, Number(spend)), ad_currency: spend === "" ? null : cur(form, "ad_currency"),
+    notes: clip(form, "notes", 800), created_by: me.id,
+  };
+  const { error } = await sb.from("client_metrics").upsert(row, { onConflict: "client_id,period,platform" });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${client_id}`); revalidatePath("/");
+});
+
+export const deleteMetricsAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const { error } = await sb.from("client_metrics").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`); revalidatePath("/");
+});
+
+/* ------------------------------------------------------------ leads */
+const LEAD_STATUSES = ["new", "contacted", "qualified", "won", "lost"];
+
+export const addLeadAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  const sb = await supabaseServer();
+  const client_id = me.role === "client" ? me.client_id : str(form, "client_id");
+  const name = str(form, "name").slice(0, 120);
+  if (!client_id) throw new Error("Pick the client");
+  if (!name) throw new Error("Enter the person's name");
+  const value = str(form, "value");
+  const { error } = await sb.from("leads").insert({
+    client_id, name, phone: clip(form, "phone", 40), email: clip(form, "email", 160), source: clip(form, "source", 40) ?? "manual",
+    value: value === "" ? null : Math.max(0, Number(value)), notes: clip(form, "notes", 800), created_by: me.id,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${client_id}`); revalidatePath("/");
+});
+
+export const updateLeadAction = safe(async (form: FormData) => {
+  await requireActive();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const status = str(form, "status");
+  if (!LEAD_STATUSES.includes(status)) throw new Error("Pick a status");
+  const value = str(form, "value");
+  const { data, error } = await sb.from("leads").update({
+    status, name: str(form, "name").slice(0, 120) || undefined, phone: clip(form, "phone", 40), email: clip(form, "email", 160),
+    value: value === "" ? null : Math.max(0, Number(value)), notes: clip(form, "notes", 800),
+  }).eq("id", id).select("client_id").single();
+  if (error || !data) throw new Error(error?.message ?? "Lead not found");
+  revalidatePath(`/clients/${data.client_id}`); revalidatePath("/");
+});
+
+export const deleteLeadAction = safe(async (form: FormData) => {
+  await requireActive();
+  const sb = await supabaseServer();
+  const { data, error } = await sb.from("leads").delete().eq("id", str(form, "id")).select("client_id").single();
+  if (error || !data) throw new Error(error?.message ?? "Lead not found");
+  revalidatePath(`/clients/${data.client_id}`); revalidatePath("/");
+});
+
+/* ------------------------------------------------------------ content calendar */
+export const reschedulePostAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const when = isoDateTime(form, "scheduled_at");
+  const { error } = await sb.from("social_posts").update({ scheduled_at: str(form, "clear") === "1" ? null : when }).eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/calendar"); revalidatePath("/studio");
+});
+
+/* ------------------------------------------------------------ recurring tasks (admin/manager) */
+export const createTemplateAction = safe(async (form: FormData) => {
+  const me = await requireLead();
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const title = str(form, "title");
+  const cadence = str(form, "cadence") === "monthly" ? "monthly" : "weekly";
+  if (!client_id || title.length < 3) throw new Error("Give the task a short title");
+  const who = str(form, "assignee");
+  const assignee = who.startsWith("role:") ? null : who || null;
+  const role = who.startsWith("role:") ? who.slice(5) : null;
+  const { error } = await sb.from("task_templates").insert({
+    client_id, title: title.slice(0, 140), description: clip(form, "description", 500), cadence,
+    weekday: cadence === "weekly" ? Math.min(7, Math.max(1, Number(str(form, "weekday")) || 1)) : null,
+    day_of_month: cadence === "monthly" ? Math.min(28, Math.max(1, Number(str(form, "day_of_month")) || 1)) : null,
+    assignee, assignee_role: role, due_in_days: Math.min(60, Math.max(0, Number(str(form, "due_in_days")) || 3)), created_by: me.id,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${client_id}`);
+});
+
+export const toggleTemplateAction = safe(async (form: FormData) => {
+  await requireLead();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("task_templates").update({ active: str(form, "active") === "true" }).eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`);
+});
+
+export const deleteTemplateAction = safe(async (form: FormData) => {
+  await requireLead();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("task_templates").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`);
+});
+
+// Create the task from a template right now (for example to try it out), without waiting for its day.
+export const runTemplateNowAction = safe(async (form: FormData) => {
+  const me = await requireLead();
+  const sb = await supabaseServer();
+  const { data: t } = await sb.from("task_templates").select("*").eq("id", str(form, "id")).single();
+  if (!t) throw new Error("Template not found");
+  const assignee = t.assignee ?? (t.assignee_role ? await pickAssignee([t.assignee_role]) : null);
+  const { error } = await sb.from("work_items").insert({ client_id: t.client_id, title: t.title, assignee, due_date: dueDateFor(t, isoDay()), visible_to_client: false, auto_created: true, template_id: t.id });
+  if (error) throw new Error(error.message);
+  if (assignee) later(() => notifyUsers([assignee], { title: "New task for you", body: snip(t.title), url: "/tasks" }, me.id));
+  revalidatePath(`/clients/${t.client_id}`); revalidatePath("/tasks");
+});
+
+/* ------------------------------------------------------------ clients ask for more */
+export const requestServiceAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  if (me.role !== "client" || !me.client_id) throw new Error("Only clients can request services");
+  const sb = await supabaseServer();
+  const service_id = str(form, "service_id");
+  const { data: svc } = await sb.from("services").select("name").eq("id", service_id).single();
+  if (!svc) throw new Error("That service isn't available");
+  const pkgId = str(form, "package_id");
+  const { data: pkg } = pkgId ? await sb.from("packages").select("name").eq("id", pkgId).single() : { data: null };
+  const note = str(form, "note").slice(0, 1500);
+  const subject = `Request: ${svc.name}${pkg ? ` (${pkg.name})` : ""}`;
+  const { data: t, error } = await sb.from("tickets").insert({ client_id: me.client_id, subject: subject.slice(0, 140), category: "new_service", priority: "normal", created_by: me.id }).select("id,ticket_no").single();
+  if (error || !t) throw new Error(error?.message ?? "Could not send your request");
+  await sb.from("ticket_messages").insert({ ticket_id: t.id, author_id: me.id, body: note || `I'd like to add ${svc.name}${pkg ? ` (${pkg.name} package)` : ""}. Please tell me the next steps.` });
+  later(async () => notifyUsers(await leadIds(), { title: "A client wants a new service", body: snip(`${who(me)}: ${subject}`), url: `/tickets/${t.id}` }, me.id));
+  revalidatePath("/tickets"); revalidatePath("/");
 });

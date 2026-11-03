@@ -155,8 +155,8 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
                   <button name="to" value="awaiting_approval" className="btn-primary w-full">Resubmit for review</button>
                   <button name="to" value="in_progress" className="btn-ghost w-full">Keep editing</button></Form>
               )}
-              {(p.status === "approved" || p.status === "scheduled") && <Form action={reviewPostAction} quiet><input type="hidden" name="id" value={id} /><button name="decision" value="posted" className="btn-lime w-full">Mark as posted</button></Form>}
-              {p.status === "posted" && <p className="text-sm text-mute">Posted{p.posted_at ? <> on <LocalTime iso={p.posted_at} mode="date" /></> : ""}.</p>}
+              {(p.status === "approved" || p.status === "scheduled") && <Form action={reviewPostAction} className="space-y-2" quiet><input type="hidden" name="id" value={id} /><input name="post_url" placeholder="Link to the live post (optional)" className="input" /><button name="decision" value="posted" className="btn-lime w-full">Mark as posted</button></Form>}
+              {p.status === "posted" && <p className="text-sm text-mute">Posted{p.posted_at ? <> on <LocalTime iso={p.posted_at} mode="date" /></> : ""}.{p.post_url && <> <a href={p.post_url} target="_blank" rel="noreferrer" className="font-medium text-forest hover:underline">View the live post</a></>}</p>}
             </section>
           )}
 

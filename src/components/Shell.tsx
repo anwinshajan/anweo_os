@@ -27,6 +27,7 @@ export function navFor(me: Me): NavItem[] {
     { href: "/tasks", label: "Tasks", icon: "tasks" },
     { href: "/chat", label: "Chat", icon: "chat" },
     { href: "/studio", label: "Studio", icon: "studio" },
+    { href: "/calendar", label: "Calendar", icon: "calendar", more: true },
     { href: "/tickets", label: "Tickets", icon: "tickets" },
     { href: "/approvals", label: "Approvals", icon: "approvals" },
     { href: "/clock", label: "Clock", icon: "clock", more: true },

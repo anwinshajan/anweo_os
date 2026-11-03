@@ -48,7 +48,7 @@ Clients and staff are in different countries, so money is handled per person and
 Everyone can see their own pay on **My pay**. Nobody except the admin can see anyone else's.
 
 ## Setup
-1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0014. Run 0003 on its own (it adds new role names).
+1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0015. Run 0003 on its own (it adds new role names).
 2. Supabase → Authentication → Sign In / Providers: enable Email, and turn **off** "Allow new users to sign up".
 3. Copy `.env.example` to `.env.local` and fill it in (see below).
 4. Create your own login in Supabase (Authentication → Users → Add user, tick auto-confirm), then run once in the SQL editor:
@@ -85,7 +85,7 @@ Push to GitHub and import into Vercel. Add the variables above under Settings �
 - Approving a post cannot be done by anyone below manager, even by calling the API directly.
 - Files are in a private bucket. The server checks the database permission first, then hands out a 60-second link.
 - Anweo AI reads data with the signed-in person's own access, so it can never see more than they can. It is rate limited to 30 questions an hour per person and cannot change anything.
-- 229 database checks, 11 currency, 29 payment-maths and 10 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
+- 251 database checks, 11 currency, 29 payment-maths and 10 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
 
 ## Branding
 Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141413`, paper `#F4F3EF`).
@@ -143,3 +143,17 @@ The search icon in the header searches everything the signed-in person is allowe
 ## Editing a client's history
 
 The admin has a **History** tab on every client: the full timeline (automatic entries like "Invoice issued" and manual ones). Each entry can be reworded, re-dated, hidden from or shown to the client, or deleted, and new entries can be added (back-dated if needed). The client's dashboard shows exactly the entries marked "client sees".
+
+## Marketing suite
+
+Per client: a **Calendar** tab (month view of every post; drag a post to another day to reschedule; the client has a read-only version on their dashboard), a **Marketing** tab (brand kit, the social accounts we manage, monthly results typed in each month, a branded monthly report PDF, and a lead form to paste on their website), and a **Leads** tab (new → contacted → qualified → won / lost, with values). `/calendar` shows every client at once. Clients see their calendar, leads (they can add and update their own), monthly reports and an "Add more to your plan" list that opens a ticket for the team.
+
+Not built yet: automatic publishing to Instagram/Facebook and pulling the numbers in from the platforms. That needs a Meta developer app with app review; the results table and `post_url` are ready for it.
+
+## Automatic tasks
+
+Managers set recurring tasks per client (weekly or monthly) in the Work tab. A daily job (the same one that runs billing) creates them and gives each to a named person or to the least busy person in a role. When a manager approves a post, the system also creates a "Publish: ..." task for the least busy person on the social team.
+
+## Website lead form
+
+`POST /api/leads/<client key>` (form or JSON: name, phone or email, message, source, optional redirect). It is public by design, protected by the long random key, a hidden spam trap, input limits and a rate limit; the client and the managers are notified.

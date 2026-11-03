@@ -2,6 +2,9 @@ import Link from "next/link";
 import Form from "@/components/Form";
 import { redirect } from "next/navigation";
 import PostThumb from "@/components/PostThumb";
+import LeadsPanel from "@/components/LeadsPanel";
+import MonthCalendar, { type CalPost } from "@/components/MonthCalendar";
+import RequestServices from "@/components/RequestServices";
 import Shell, { Empty, PageHead, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import { Corner, Logo } from "@/components/Logo";
 import { signDocumentAction } from "./actions";
@@ -11,7 +14,7 @@ import { effectiveDueDate, intervalLabel, isOverdue, isoDay } from "@/lib/paymen
 
 export const dynamic = "force-dynamic";
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; show?: string }> }) {
+export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; show?: string; m?: string }> }) {
   const me = await getMe();
   if (!me) redirect("/login");
   if (me.status !== "active") {
@@ -27,8 +30,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
       </main>
     );
   }
-  const { q, show } = await searchParams;
-  return <Shell me={me}>{me.role === "client" ? <ClientPortal me={me} /> : <StaffHome me={me} q={q ?? ""} archived={show === "archived"} />}</Shell>;
+  const { q, show, m } = await searchParams;
+  return <Shell me={me}>{me.role === "client" ? <ClientPortal me={me} m={m} /> : <StaffHome me={me} q={q ?? ""} archived={show === "archived"} />}</Shell>;
 }
 
 /* ---------------- Staff ---------------- */
@@ -116,15 +119,15 @@ function Stat({ tag, value, href, hot, green }: { tag: string; value: React.Reac
 }
 
 /* ---------------- Client portal ---------------- */
-async function ClientPortal({ me }: { me: Me }) {
+async function ClientPortal({ me, m }: { me: Me; m?: string }) {
   const sb = await supabaseServer();
   const cid = me.client_id;
   if (!cid) {
     return <div className="card text-center"><p className="font-semibold">Your account isn't linked to a business yet.</p><p className="mt-1 text-sm text-mute">Please ask the Anweo team to finish setting you up.</p></div>;
   }
   const [{ data: client }, { data: subs }, { data: projects }, { data: work }, { data: posts }, { data: invoices }, { data: docs }, { data: history }, { data: plans }] = await Promise.all([
-    sb.from("clients").select("business_name,payment_terms_days,late_grace_days,late_interest_percent").eq("id", cid).single(),
-    sb.from("client_services").select("id,price_monthly,currency,status,start_date,services(name,description)").eq("client_id", cid).order("created_at"),
+    sb.from("clients").select("business_name,currency,payment_terms_days,late_grace_days,late_interest_percent").eq("id", cid).single(),
+    sb.from("client_services").select("id,service_id,price_monthly,currency,status,start_date,services(name,description)").eq("client_id", cid).order("created_at"),
     sb.from("projects").select("id,title,description,status,due_date,milestones(id,title,done,sort_order)").eq("client_id", cid).order("created_at", { ascending: false }),
     sb.from("work_items").select("id,title,status,due_date,updated_at").eq("client_id", cid).order("updated_at", { ascending: false }),
     sb.from("social_posts").select("id,kind,platform,title,caption,hashtags,status,scheduled_at,posted_at,post_media(id,mime_type,sort_order)").eq("client_id", cid).order("scheduled_at", { ascending: true, nullsFirst: false }),
@@ -137,6 +140,12 @@ async function ClientPortal({ me }: { me: Me }) {
   const terms = client?.payment_terms_days ?? 7;
   const invById = new Map((invoices ?? []).map((i) => [i.id, i]));
   const { data: updatesAll } = await sb.from("project_updates").select("id,project_id,body,created_at").in("project_id", (projects ?? []).map((p: any) => p.id).concat(["00000000-0000-0000-0000-000000000000"])).order("created_at", { ascending: false });
+  const { data: myLeads } = await sb.from("leads").select("id,name,phone,email,source,status,value,notes,created_at").eq("client_id", cid).order("created_at", { ascending: false }).limit(100);
+  const { data: svcAll } = await sb.from("services").select("id,name,description").eq("active", true).order("sort_order");
+  const { data: pkgAll } = await sb.from("packages").select("id,service_id,name,price_monthly,currency,prices").eq("active", true).order("price_monthly");
+  const calMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(m ?? "") ? m! : new Date().toISOString().slice(0, 7);
+  const calPosts: CalPost[] = (posts ?? []).map((p: any) => ({ id: p.id, title: p.title || (p.caption ?? "").slice(0, 50), status: p.status, kind: p.kind, platform: p.platform, at: p.scheduled_at ?? p.posted_at })).filter((p) => p.at);
+  const reportMonths = Array.from({ length: 6 }, (_, i) => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - i); return { ym: d.toISOString().slice(0, 7), label: d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }) }; });
   const { data: myTickets } = await sb.from("tickets").select("id,ticket_no,subject,status,updated_at").order("updated_at", { ascending: false }).limit(5);
   const openTickets = (myTickets ?? []).filter((t) => t.status !== "resolved" && t.status !== "closed");
   const lateRate = Number(client?.late_interest_percent ?? 0);
@@ -366,6 +375,11 @@ async function ClientPortal({ me }: { me: Me }) {
         </div>
       </section>
 
+      <section className="card">
+        <p className="tag mb-3">[ Your content calendar ]</p>
+        <MonthCalendar posts={calPosts} month={calMonth} hrefBase="/" canEdit={false} />
+      </section>
+
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="card">
           <p className="tag mb-3">[ Approved content, coming up ]</p>
@@ -393,6 +407,22 @@ async function ClientPortal({ me }: { me: Me }) {
             ))}
           </div>
         </section>
+      </div>
+
+      <section className="card">
+        <p className="tag mb-3">[ Your leads ]</p>
+        <LeadsPanel leads={myLeads ?? []} currency={client?.currency ?? "INR"} isClient />
+      </section>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section className="card">
+          <p className="tag mb-1">[ Monthly reports ]</p>
+          <p className="mb-3 text-sm text-mute">What we published, how it performed and the leads it brought in.</p>
+          <div className="space-y-2">
+            {reportMonths.map((r) => <a key={r.ym} href={`/api/reports/${cid}/pdf?month=${r.ym}`} target="_blank" rel="noreferrer" className="row hover:border-forest/40"><span className="font-medium">{r.label}</span><span className="text-xs font-medium text-forest">Open PDF</span></a>)}
+          </div>
+        </section>
+        <RequestServices services={svcAll ?? []} packages={(pkgAll ?? []) as any} activeIds={activeSubs.map((x: any) => x.service_id).filter(Boolean)} currency={client?.currency ?? "INR"} />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">

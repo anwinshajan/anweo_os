@@ -19,6 +19,7 @@ const sql11 = mig("0011_social_team_access.sql");
 const sql12 = mig("0012_payment_options.sql");
 const sql13 = mig("0013_tickets_updates.sql");
 const sql14 = mig("0014_history_admin_edit.sql");
+const sql15 = mig("0015_marketing_suite.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -43,6 +44,7 @@ await db.exec(sql11);
 await db.exec(sql12);
 await db.exec(sql13);
 await db.exec(sql14);
+await db.exec(sql15);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -709,6 +711,66 @@ await as(admin, async () => {
   const d = await q(`delete from activity_log where id=${hid}`);
   ok("the admin can delete an entry", (d.affectedRows ?? d.rowCount) === 1);
 });
+
+// =================== PHASE 6: marketing suite ===================
+await q(`insert into client_brand(client_id, tone, hashtags) values ('${clA}', 'Warm and premium', '#salon'), ('${clB}', 'Bold', '#b')`);
+await as(cA, async () => {
+  const b = (await q(`select tone from client_brand`)).rows;
+  ok("a client sees only their own brand kit", b.length === 1 && b[0].tone === "Warm and premium");
+  const u = await q(`update client_brand set tone='mine' where client_id='${clA}'`);
+  ok("a client cannot edit their brand kit", (u.affectedRows ?? u.rowCount ?? 0) === 0);
+});
+await as(sm, async () => {
+  const u = await q(`update client_brand set tone='Warm, premium and calm' where client_id='${clA}'`);
+  ok("the social team can edit a brand kit", (u.affectedRows ?? u.rowCount) === 1);
+  await q(`insert into social_accounts(client_id, platform, handle) values ('${clA}', 'instagram', '@rbeauty')`);
+  ok("the social team can add accounts", true);
+  await q(`insert into client_metrics(client_id, period, followers, reach) values ('${clA}', '2026-10-01', 1200, 8400)`);
+  ok("the social team can record monthly results", true);
+  let b = false; try { await q(`insert into client_metrics(client_id, period) values ('${clA}', '2026-10-15')`); } catch { b = true; }
+  ok("results must be for the first of a month", b);
+});
+await q(`update profiles set can_manage_social=false where id='${dev}'`);
+await as(dev, async () => {
+  let b = false; try { await q(`insert into social_accounts(client_id, platform, handle) values ('${clA}', 'facebook', 'x')`); } catch { b = true; }
+  ok("a developer cannot add social accounts", b);
+});
+await as(cA, async () => {
+  ok("a client sees their accounts and results but not another client's", (await q(`select id from social_accounts`)).rows.length === 1 && (await q(`select id from client_metrics`)).rows.length === 1);
+  let b = false; try { await q(`insert into client_metrics(client_id, period) values ('${clA}', '2026-09-01')`); } catch { b = true; }
+  ok("a client cannot write results", b);
+});
+
+// leads
+let leadA;
+await as(cA, async () => {
+  leadA = (await q(`insert into leads(client_id, name, phone, source) values ('${clA}', 'Priya', '+91 90000 11111', 'manual') returning id`)).rows[0].id;
+  ok("a client can add their own lead", !!leadA);
+  let b = false; try { await q(`insert into leads(client_id, name) values ('${clB}', 'sneaky')`); } catch { b = true; }
+  ok("a client cannot add a lead to another client", b);
+  const u = await q(`update leads set status='won', value=5000 where id='${leadA}'`);
+  ok("a client can move their lead through the pipeline", (u.affectedRows ?? u.rowCount) === 1);
+  b = false; try { await q(`update leads set status='bogus' where id='${leadA}'`); } catch { b = true; }
+  ok("lead status is validated", b);
+});
+await as(cB, async () => { ok("another client cannot see the lead", (await q(`select id from leads`)).rows.length === 0); });
+await as(dev, async () => { ok("staff see all leads", (await q(`select id from leads`)).rows.length === 1); });
+ok("every client has a lead key", (await q(`select count(*)::int n from clients where lead_key is null`)).rows[0].n === 0);
+ok("lead keys are unique", (await q(`select count(distinct lead_key)::int a, count(*)::int b from clients`)).rows.map((r) => r.a === r.b)[0]);
+
+// task templates
+await as(mgr, async () => {
+  await q(`insert into task_templates(client_id, title, cadence, day_of_month, assignee_role) values ('${clA}', 'Plan next month content calendar', 'monthly', 25, 'social_manager')`);
+  ok("a manager can create a recurring task", true);
+  let b = false; try { await q(`insert into task_templates(client_id, title, cadence) values ('${clA}', 'x', 'monthly')`); } catch { b = true; }
+  ok("a task needs a real title", b);
+});
+await as(sm, async () => {
+  ok("team members can see recurring tasks", (await q(`select id from task_templates`)).rows.length === 1);
+  let b = false; try { await q(`insert into task_templates(client_id, title, cadence) values ('${clA}', 'Sneaky task', 'weekly')`); } catch { b = true; }
+  ok("only managers create recurring tasks", b);
+});
+await as(cA, async () => { ok("clients cannot see recurring tasks", (await q(`select id from task_templates`)).rows.length === 0); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

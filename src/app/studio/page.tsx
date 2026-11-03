@@ -35,7 +35,9 @@ export default async function Studio({ searchParams }: { searchParams: Promise<{
 
   return (
     <Shell me={me}>
-      <PageHead tag="Social" title="Studio" sub="Plan ideas, make posts, upload your work. Once a manager approves it, the client can see it." />
+      <PageHead tag="Social" title="Studio" sub="Plan ideas, make posts, upload your work. Once a manager approves it, the client can see it.">
+        <Link href="/calendar" className="btn-ghost">Calendar</Link>
+      </PageHead>
 
       {social && (
         <details className="card mb-6 !p-0">

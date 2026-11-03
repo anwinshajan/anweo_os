@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
 import { adminIds, clientUserIds, notifyUsers } from "@/lib/notify";
 import { addDays, isoDay } from "@/lib/payments";
+import { runTaskTemplates } from "@/lib/automation";
 import { formatMoney } from "@/lib/currency";
 
 export const dynamic = "force-dynamic";
@@ -45,5 +46,7 @@ export async function GET(req: Request) {
       reminders++;
     }
   } catch (e) { console.error("reminders failed", e); }
-  return NextResponse.json({ ok: true, invoicesCreated: data, reminders });
+  let tasks = 0;
+  try { tasks = await runTaskTemplates(isoDay()); } catch (e) { console.error("recurring tasks failed", e); }
+  return NextResponse.json({ ok: true, invoicesCreated: data, reminders, tasksCreated: tasks });
 }

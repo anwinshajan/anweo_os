@@ -7,6 +7,11 @@ import UploadForm from "@/components/UploadForm";
 import BillingTab from "./BillingTab";
 import ProjectsTab from "./ProjectsTab";
 import HistoryTab from "./HistoryTab";
+import CalendarTab from "./CalendarTab";
+import MarketingTab from "./MarketingTab";
+import LeadsTab from "./LeadsTab";
+import TemplatesSection from "./TemplatesSection";
+import { headers } from "next/headers";
 import CountryCurrency from "@/components/CountryCurrency";
 import CurrencySelect from "@/components/CurrencySelect";
 import {
@@ -22,13 +27,16 @@ export const dynamic = "force-dynamic";
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "projects", label: "Projects" },
+  { key: "calendar", label: "Calendar" },
+  { key: "marketing", label: "Marketing" },
+  { key: "leads", label: "Leads" },
   { key: "documents", label: "Documents" },
   { key: "work", label: "Work & content" },
   { key: "billing", label: "Billing", adminOnly: true },
   { key: "history", label: "History", adminOnly: true },
 ];
 
-export default async function ClientDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
+export default async function ClientDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; m?: string }> }) {
   const me = await getMe();
   if (!me) redirect("/login");
   if (me.status !== "active" || me.role === "client") redirect("/");
@@ -36,7 +44,10 @@ export default async function ClientDetail({ params, searchParams }: { params: P
   const admin = isAdminRole(me.role);
   const sb = await supabaseServer();
   const { id } = await params;
-  const { tab: rawTab } = await searchParams;
+  const sp = await searchParams;
+  const rawTab = sp.tab;
+  const h = await headers();
+  const origin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("host") ?? "localhost"}`;
   const visibleTabs = TABS.filter((t) => !t.adminOnly || admin);
   const tab = visibleTabs.some((t) => t.key === rawTab) ? (rawTab as string) : "overview";
 
@@ -81,7 +92,11 @@ export default async function ClientDetail({ params, searchParams }: { params: P
         {tab === "projects" && <ProjectsTab id={id} admin={admin} client={client} />}
         {tab === "documents" && <Documents id={id} lead={lead} />}
         {tab === "work" && <WorkAndContent id={id} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
+        {tab === "work" && lead && <TemplatesSection id={id} />}
         {tab === "billing" && admin && <BillingTab id={id} client={client} />}
+        {tab === "calendar" && <CalendarTab id={id} month={/^\d{4}-(0[1-9]|1[0-2])$/.test(sp.m ?? "") ? sp.m! : new Date().toISOString().slice(0, 7)} canEdit={lead || me.role === "social_manager" || me.role === "marketing" || me.role === "designer" || me.can_manage_social} />}
+        {tab === "marketing" && <MarketingTab id={id} currency={client.currency} canEdit={lead || me.role === "social_manager" || me.role === "marketing" || me.role === "designer" || me.can_manage_social} origin={origin} />}
+        {tab === "leads" && <LeadsTab id={id} currency={client.currency} />}
         {tab === "history" && admin && <HistoryTab id={id} />}
       </div>
     </Shell>
