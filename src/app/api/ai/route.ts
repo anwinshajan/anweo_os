@@ -120,68 +120,59 @@ export async function POST(req: Request) {
   const turns = [...history.map((h) => ({ role: h.role, content: h.content })), { role: "user", content: message }];
   try {
     if (useRouter) {
-      // Routers differ in what they accept, so try the fullest request first and fall back to simpler ones.
+      const t0 = Date.now();
+      const headers = { "content-type": "application/json", authorization: `Bearer ${routerKey}` };
       const merged = [{ role: "user", content: `${system}\n\n---\n\n${turns.map((t) => `${t.role}: ${t.content}`).join("\n")}` }];
-      const asParts = [{ role: "user", content: [{ type: "text", text: merged[0].content }] }];
-      const attempts: Record<string, unknown>[] = [
-        { model: routerModel, max_tokens: 700, messages: [{ role: "system", content: system }, ...turns] },
-        { model: routerModel, messages: [{ role: "system", content: system }, ...turns] },
-        { model: routerModel, messages: merged },
-        { model: routerModel, messages: asParts },
-        { model: routerModel, max_completion_tokens: 700, messages: merged },
-        { model: routerModel, stream: true, messages: merged },
-      ];
-      let res!: Response;
-      let errText = "";
-      for (const body of attempts) {
-        res = await fetch(`${routerBase}/chat/completions`, {
-          method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${routerKey}` },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(20_000),
-        });
-        if (res.ok || res.status !== 400) break;
-        errText = (await res.text()).slice(0, 300);
-        console.error("ai router 400, retrying simpler", errText);
-      }
-      if (!res.ok) {
-        console.error("ai router error", res.status, errText || "");
-        // The model name may be written differently by the router (for example with a provider prefix). Ask it what it has.
-        let tried = "";
+
+      // One model, trying the request in a few formats because routers and models differ in what they accept.
+      const ask = async (model: string, full: boolean): Promise<string> => {
+        const bodies: Record<string, unknown>[] = full
+          ? [
+              { model, max_tokens: 700, messages: [{ role: "system", content: system }, ...turns] },
+              { model, messages: [{ role: "system", content: system }, ...turns] },
+              { model, messages: merged },
+              { model, stream: true, messages: merged },
+            ]
+          : [{ model, messages: merged }];
+        for (const body of bodies) {
+          if (Date.now() - t0 > 42_000) break;
+          try {
+            const r = await fetch(`${routerBase}/chat/completions`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(full ? 14_000 : 9_000) });
+            const ctype = r.headers.get("content-type") ?? "";
+            const raw = await r.text();
+            if (!r.ok) { console.error("ai router", model, r.status, raw.slice(0, 200)); if (r.status === 400) continue; break; }
+            let out = "";
+            if (ctype.includes("text/event-stream") || raw.startsWith("data:")) {
+              for (const line of raw.split("\n")) {
+                if (!line.startsWith("data:")) continue;
+                const payload = line.slice(5).trim();
+                if (!payload || payload === "[DONE]") continue;
+                try { const j = JSON.parse(payload); const t = j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.message?.content; if (typeof t === "string") out += t; } catch { /* skip */ }
+              }
+            } else {
+              try { const j = JSON.parse(raw); const c = j.choices?.[0]?.message?.content; out = typeof c === "string" ? c : Array.isArray(c) ? c.map((x: { text?: string }) => x.text ?? "").join("") : ""; } catch { /* not json */ }
+            }
+            out = out.trim();
+            if (out) return out;
+            console.error("ai router", model, "200 but no text:", raw.slice(0, 300));
+          } catch (e) { console.error("ai router request failed", model, String(e).slice(0, 120)); }
+        }
+        return "";
+      };
+
+      reply = await ask(routerModel!, true);
+      if (!reply) {
+        // The chosen model is failing. Try other models on the same router so people still get an answer, and log which ones work.
+        let ids: string[] = [];
         try {
-          const ml = await fetch(`${routerBase}/models`, { headers: { authorization: `Bearer ${routerKey}` }, signal: AbortSignal.timeout(10_000) });
-          const mj = ml.ok ? await ml.json() : null;
-          const ids: string[] = (mj?.data ?? []).map((m: { id?: string }) => String(m.id ?? "")).filter(Boolean);
-          console.error("ai router models", ml.status, ids.slice(0, 40).join(", "), "| configured:", routerModel, "| in list:", ids.includes(routerModel!));
-          const want = routerModel!.toLowerCase();
-          const alt = ids.find((id) => id !== routerModel && (id.toLowerCase().endsWith("/" + want) || want.endsWith("/" + id.toLowerCase()) || id.toLowerCase() === want));
-          if (alt) {
-            tried = alt;
-            const r2 = await fetch(`${routerBase}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${routerKey}` }, body: JSON.stringify({ model: alt, messages: [{ role: "system", content: system }, ...turns] }), signal: AbortSignal.timeout(25_000) });
-            if (r2.ok) { res = r2; console.error("ai router: model name corrected to", alt); }
-            else console.error("ai router alt model failed", alt, r2.status, (await r2.text()).slice(0, 200));
-          }
-        } catch (e) { console.error("ai router models lookup failed", String(e).slice(0, 120)); }
-        if (!res.ok) {
-          void tried;
-          return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
+          const ml = await fetch(`${routerBase}/models`, { headers: { authorization: `Bearer ${routerKey}` }, signal: AbortSignal.timeout(8_000) });
+          ids = ml.ok ? ((await ml.json())?.data ?? []).map((m: { id?: string }) => String(m.id ?? "")).filter(Boolean) : [];
+        } catch { /* ignore */ }
+        const wanted = (process.env.AI_FALLBACK_MODELS ?? "glm-5.3-flash,qwen3.8-flash,deepseek-v4.1-flash,minimax-m3.1-flash,mimo-v2.6-flash,claude-haiku-5.5").split(",").map((x) => x.trim()).filter(Boolean);
+        for (const m of wanted.filter((m) => m !== routerModel && (ids.length === 0 || ids.includes(m)))) {
+          reply = await ask(m, false);
+          if (reply) { console.error("ai router: answered by fallback model", m, "(configured model failed:", routerModel + ")"); break; }
         }
-      }
-      const ctype = res.headers.get("content-type") ?? "";
-      if (ctype.includes("text/event-stream")) {
-        // Some models only answer as a stream: read it and join the pieces.
-        const raw = await res.text();
-        for (const line of raw.split("\n")) {
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
-          try { const j = JSON.parse(payload); const t = j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.message?.content; if (typeof t === "string") reply += t; } catch { /* skip */ }
-        }
-        reply = reply.trim();
-      } else {
-        const data = await res.json();
-        const c = data.choices?.[0]?.message?.content;
-        reply = (typeof c === "string" ? c : Array.isArray(c) ? c.map((x: { text?: string }) => x.text ?? "").join("") : "").trim();
       }
     } else {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
