@@ -21,6 +21,7 @@ const sql13 = mig("0013_tickets_updates.sql");
 const sql14 = mig("0014_history_admin_edit.sql");
 const sql15 = mig("0015_marketing_suite.sql");
 const sql16 = mig("0016_client_files.sql");
+const sql17 = mig("0017_direct_messages_mentions.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -47,6 +48,7 @@ await db.exec(sql13);
 await db.exec(sql14);
 await db.exec(sql15);
 await db.exec(sql16);
+await db.exec(sql17);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -822,6 +824,40 @@ await as(admin, async () => {
   const d = await q(`delete from client_files where id='${fFolder}'`);
   ok("the admin can delete a folder and everything in it", (d.affectedRows ?? d.rowCount) === 1 && (await q(`select id from client_files`)).rows.length === 0);
 });
+
+// =================== PHASE 8: direct messages, mentions, priority notifications ===================
+await as(sm, async () => {
+  await q(`insert into messages(sender_id, recipient_id, body) values ('${sm}', '${mgr}', 'Can you check the reel caption?')`);
+  ok("a team member can message a manager directly", true);
+  let b = false; try { await q(`insert into messages(sender_id, recipient_id, body) values ('${sm}', '${cA}', 'hi client')`); } catch { b = true; }
+  ok("team members cannot direct-message a client", b);
+  b = false; try { await q(`insert into messages(sender_id, recipient_id, body) values ('${sm}', '${sm}', 'talking to myself')`); } catch { b = true; }
+  ok("you cannot direct-message yourself", b);
+  b = false; try { await q(`insert into messages(sender_id, recipient_id, body) values ('${mgr}', '${sm}', 'forged')`); } catch { b = true; }
+  ok("you cannot send a direct message as someone else", b);
+  b = false; try { await q(`insert into messages(sender_id, recipient_id, client_id, body) values ('${sm}', '${mgr}', '${clA}', 'mixed')`); } catch { b = true; }
+  ok("a direct message cannot also belong to a client thread", b);
+  ok("the sender sees the conversation", (await q(`select id from dm_thread('${mgr}')`)).rows.length === 1);
+});
+await as(mgr, async () => {
+  await q(`insert into messages(sender_id, recipient_id, body) values ('${mgr}', '${sm}', 'Looks good, approving now')`);
+  ok("a manager can reply directly", (await q(`select id from dm_thread('${sm}')`)).rows.length === 2);
+});
+await as(dev, async () => { ok("a third team member cannot read someone else's direct messages", (await q(`select id from messages where recipient_id is not null`)).rows.length === 0 && (await q(`select id from dm_thread('${sm}')`)).rows.length === 0); });
+await as(admin, async () => { ok("not even the admin can read other people's direct messages", (await q(`select id from messages where recipient_id is not null`)).rows.length === 0 && (await q(`select id from dm_thread('${sm}')`)).rows.length === 0); });
+await as(cA, async () => { ok("a client never sees direct messages", (await q(`select id from messages where recipient_id is not null`)).rows.length === 0); });
+await as(sm, async () => {
+  const team = (await q(`select body from chat_thread(null)`)).rows.map((r) => r.body);
+  ok("direct messages never appear in the team channel", !team.includes("Can you check the reel caption?") && !team.includes("Looks good, approving now"));
+  await q(`insert into messages(sender_id, body, mentions) values ('${sm}', '@Maya please look', array['${mgr}']::uuid[])`);
+  ok("team messages can carry mentions", (await q(`select id from chat_thread(null) where body like '@Maya%'`)).rows.length === 1);
+});
+await as(cA, async () => {
+  await q(`insert into messages(sender_id, client_id, body) values ('${cA}', '${clA}', 'Hello team')`);
+  ok("client threads still work", (await q(`select id from chat_thread('${clA}')`)).rows.length >= 1);
+});
+await q(`insert into notifications(user_id, title, priority) values ('${mgr}', 'Mentioned', true), ('${mgr}', 'Plain', false)`);
+await as(mgr, async () => { const n = (await q(`select title, priority from notifications where title in ('Mentioned','Plain') order by title`)).rows; ok("notifications can be marked priority", n.length === 2 && n[0].priority === true && n[1].priority === false); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

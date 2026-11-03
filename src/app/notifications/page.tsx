@@ -14,7 +14,7 @@ export default async function Notifications() {
   if (!me) redirect("/login");
   if (me.status !== "active") redirect("/");
   const sb = await supabaseServer();
-  const { data } = await sb.from("notifications").select("id,title,body,url,read_at,created_at").order("created_at", { ascending: false }).limit(60);
+  const { data } = await sb.from("notifications").select("id,title,body,url,read_at,created_at,priority").order("created_at", { ascending: false }).limit(60);
   const unread = (data ?? []).filter((n) => !n.read_at).length;
   return (
     <Shell me={me}>
@@ -27,9 +27,9 @@ export default async function Notifications() {
         {(data ?? []).map((n) => {
           const inner = (
             <>
-              <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${n.read_at ? "bg-transparent" : "bg-forest"}`} />
+              <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${n.read_at ? "bg-transparent" : n.priority ? "bg-red-500" : "bg-forest"}`} />
               <div className="min-w-0 flex-1">
-                <p className={`truncate ${n.read_at ? "text-ink/70" : "font-semibold"}`}>{n.title}</p>
+                <p className={`truncate ${n.read_at ? "text-ink/70" : "font-semibold"}`}>{n.priority && <span className="mr-1.5 rounded bg-red-500 px-1.5 py-0.5 align-middle font-mono text-[9px] uppercase text-white">Priority</span>}{n.title}</p>
                 {n.body && <p className="line-clamp-2 text-sm text-mute">{n.body}</p>}
                 <p className="mt-0.5 font-mono text-[10px] uppercase text-mute"><LocalTime iso={n.created_at} /></p>
               </div>

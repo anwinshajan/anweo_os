@@ -33,10 +33,15 @@ export default async function ChatIndex() {
   }
 
   const sb = await supabaseServer();
-  const [{ data: clients }, { data: last }] = await Promise.all([
+  const [{ data: clients }, { data: last }, { data: team }, { data: dms }] = await Promise.all([
     sb.from("clients").select("id,business_name").eq("status", "active").order("business_name"),
     sb.from("messages").select("client_id,body,created_at").not("client_id", "is", null).order("created_at", { ascending: false }).limit(200),
+    sb.from("profiles").select("id,full_name,email,role").eq("status", "active").neq("role", "client").neq("id", me.id).order("full_name"),
+    sb.from("messages").select("sender_id,recipient_id,body,created_at").not("recipient_id", "is", null).order("created_at", { ascending: false }).limit(200),
   ]);
+  const lastDm = new Map<string, { body: string; created_at: string }>();
+  (dms ?? []).forEach((m: any) => { const o = m.sender_id === me.id ? m.recipient_id : m.sender_id; if (!lastDm.has(o)) lastDm.set(o, m); });
+  const people = [...(team ?? [])].sort((a: any, b: any) => (lastDm.get(b.id)?.created_at ?? "").localeCompare(lastDm.get(a.id)?.created_at ?? ""));
   const latest = new Map<string, { body: string; created_at: string }>();
   (last ?? []).forEach((m: any) => { if (!latest.has(m.client_id)) latest.set(m.client_id, m); });
   const sorted = [...(clients ?? [])].sort((a, b) => (latest.get(b.id)?.created_at ?? "").localeCompare(latest.get(a.id)?.created_at ?? ""));
@@ -51,6 +56,23 @@ export default async function ChatIndex() {
         <Link href="/chat/ai" className="card-green block !p-4 transition hover:-translate-y-0.5">
           <p className="tag !text-lime">Assistant</p><p className="mt-1 text-lg font-bold">Anweo AI</p><p className="text-sm text-paper/70">Ask about clients, packages and how things work.</p>
         </Link>
+      </div>
+      <p className="tag mb-3">[ Direct messages ]</p>
+      <div className="mb-6 grid gap-2 sm:grid-cols-2">
+        {people.length === 0 && <Empty>No other team members yet.</Empty>}
+        {people.map((p: any) => {
+          const m = lastDm.get(p.id);
+          const name = p.full_name || p.email || "Team member";
+          return (
+            <Link key={p.id} href={`/chat/dm/${p.id}`} className="card flex items-center gap-3 !p-3 transition hover:-translate-y-0.5 hover:border-forest/40">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-lime text-sm font-bold text-ink">{name[0]?.toUpperCase()}</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold">{name} <span className="font-mono text-[10px] font-normal uppercase text-mute">{p.role}</span></p>
+                <p className="truncate text-xs text-mute">{m ? m.body : "Start a conversation"}</p>
+              </div>
+            </Link>
+          );
+        })}
       </div>
       <p className="tag mb-3">[ Client conversations ]</p>
       <div className="space-y-2">

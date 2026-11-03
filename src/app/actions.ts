@@ -1,4 +1,5 @@
 "use server";
+import { mentionPeople } from "@/lib/chat";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { formatMoney } from "@/lib/currency";
@@ -493,16 +494,34 @@ export async function sendMessageAction(form: FormData): Promise<{ error?: strin
     const body = str(form, "body").slice(0, 4000);
     if (!body) return {};
     const client_id = str(form, "client_id") || null;
+    const recipient = str(form, "recipient_id") || null;
     // Clients can only ever write to their own thread; the database enforces it too.
-    const target = me.role === "client" ? me.client_id : client_id;
+    const target = me.role === "client" ? me.client_id : recipient ? null : client_id;
     if (me.role === "client" && !target) return { error: "Your account isn't linked to a client yet" };
+    if (recipient && me.role === "client") return { error: "Direct messages are for the team" };
+    if (recipient === me.id) return { error: "You can't message yourself" };
+
+    // Mentions: keep only people who are allowed to be mentioned in this chat (never trust the browser).
+    let wanted: string[] = [];
+    try { wanted = JSON.parse(str(form, "mentions") || "[]"); } catch {}
+    const allowed = new Set((recipient ? [] : (await mentionPeople(me, target)).map((p) => p.id)));
+    const mentions = [...new Set(wanted.filter((x) => typeof x === "string" && allowed.has(x)))].slice(0, 20);
+
     const sb = await supabaseServer();
-    const { error } = await sb.from("messages").insert({ client_id: target, sender_id: me.id, body });
+    const { error } = await sb.from("messages").insert({ client_id: target, recipient_id: recipient, sender_id: me.id, body, mentions });
     if (error) return { error: error.message };
     later(async () => {
-      if (!target) await notifyUsers(await staffIds(), { title: `${who(me)} in Team chat`, body: snip(body), url: "/chat/team" }, me.id);
-      else if (me.role === "client") await notifyUsers(await leadIds(), { title: `${who(me)} (client)`, body: snip(body), url: `/chat/c/${target}` }, me.id);
-      else await notifyUsers(await clientUserIds(target), { title: "Message from the Anweo team", body: snip(body), url: `/chat/c/${target}` }, me.id);
+      const mentioned = new Set(mentions);
+      const url = recipient ? `/chat/dm/${me.id}` : !target ? "/chat/team" : `/chat/c/${target}`;
+      // The mentioned person gets a priority notification, wherever they are allowed to read.
+      if (mentioned.size) {
+        await notifyUsers([...mentioned], { title: `${who(me)} mentioned you`, body: snip(body), url, priority: true }, me.id);
+      }
+      const skip = (ids: string[]) => ids.filter((i) => !mentioned.has(i));
+      if (recipient) await notifyUsers([recipient], { title: `${who(me)}`, body: snip(body), url: `/chat/dm/${me.id}` }, me.id);
+      else if (!target) await notifyUsers(skip(await staffIds()), { title: `${who(me)} in Team chat`, body: snip(body), url: "/chat/team" }, me.id);
+      else if (me.role === "client") await notifyUsers(skip(await leadIds()), { title: `${who(me)} (client)`, body: snip(body), url: `/chat/c/${target}` }, me.id);
+      else await notifyUsers(skip(await clientUserIds(target)), { title: "Message from the Anweo team", body: snip(body), url: `/chat/c/${target}` }, me.id);
     });
     return {};
   } catch (e) {

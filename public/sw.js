@@ -12,6 +12,8 @@ self.addEventListener("push", (event) => {
       icon: "/icon-192.png",
       badge: "/icon-192.png",
       tag: data.tag || undefined,
+      requireInteraction: !!data.priority,
+      vibrate: data.priority ? [200, 100, 200] : undefined,
       data: { url: data.url || "/" },
     })
   );

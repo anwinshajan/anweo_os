@@ -16,21 +16,21 @@ function vapidReady() {
   return true;
 }
 
-export type Note = { title: string; body?: string; url?: string };
+export type Note = { title: string; body?: string; url?: string; priority?: boolean };
 
 export async function notifyUsers(userIds: (string | null | undefined)[], n: Note, except?: string) {
   const ids = [...new Set(userIds.filter((x): x is string => !!x && x !== except))];
   if (ids.length === 0) return;
   try {
     const admin = supabaseAdmin();
-    await admin.from("notifications").insert(ids.map((user_id) => ({ user_id, title: n.title, body: n.body ?? null, url: n.url ?? null })));
+    await admin.from("notifications").insert(ids.map((user_id) => ({ user_id, title: n.title, body: n.body ?? null, url: n.url ?? null, priority: !!n.priority })));
     if (!vapidReady()) return;
     const { data: subs } = await admin.from("push_subscriptions").select("id,endpoint,keys").in("user_id", ids).eq("kind", "web");
-    const payload = JSON.stringify({ title: n.title, body: n.body ?? "", url: n.url ?? "/" });
+    const payload = JSON.stringify({ title: n.title, body: n.body ?? "", url: n.url ?? "/", priority: !!n.priority, tag: n.priority ? "priority" : undefined });
     await Promise.allSettled(
       (subs ?? []).map(async (s) => {
         try {
-          await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys as { p256dh: string; auth: string } }, payload, { TTL: 3600 });
+          await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys as { p256dh: string; auth: string } }, payload, n.priority ? { TTL: 86400, urgency: "high" } : { TTL: 3600 });
         } catch (e) {
           const code = (e as { statusCode?: number }).statusCode;
           if (code === 404 || code === 410) await admin.from("push_subscriptions").delete().eq("id", s.id); // device is gone
