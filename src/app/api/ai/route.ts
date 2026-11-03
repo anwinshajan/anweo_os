@@ -141,8 +141,27 @@ export async function POST(req: Request) {
         console.error("ai router 400, retrying simpler", errText);
       }
       if (!res.ok) {
-        console.error("ai router error", res.status, errText || (await res.text()).slice(0, 300));
-        return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
+        console.error("ai router error", res.status, errText || "");
+        // The model name may be written differently by the router (for example with a provider prefix). Ask it what it has.
+        let tried = "";
+        try {
+          const ml = await fetch(`${routerBase}/models`, { headers: { authorization: `Bearer ${routerKey}` }, signal: AbortSignal.timeout(10_000) });
+          const mj = ml.ok ? await ml.json() : null;
+          const ids: string[] = (mj?.data ?? []).map((m: { id?: string }) => String(m.id ?? "")).filter(Boolean);
+          console.error("ai router models", ml.status, ids.slice(0, 40).join(", "), "| configured:", routerModel, "| in list:", ids.includes(routerModel!));
+          const want = routerModel!.toLowerCase();
+          const alt = ids.find((id) => id !== routerModel && (id.toLowerCase().endsWith("/" + want) || want.endsWith("/" + id.toLowerCase()) || id.toLowerCase() === want));
+          if (alt) {
+            tried = alt;
+            const r2 = await fetch(`${routerBase}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${routerKey}` }, body: JSON.stringify({ model: alt, messages: [{ role: "system", content: system }, ...turns] }), signal: AbortSignal.timeout(25_000) });
+            if (r2.ok) { res = r2; console.error("ai router: model name corrected to", alt); }
+            else console.error("ai router alt model failed", alt, r2.status, (await r2.text()).slice(0, 200));
+          }
+        } catch (e) { console.error("ai router models lookup failed", String(e).slice(0, 120)); }
+        if (!res.ok) {
+          void tried;
+          return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
+        }
       }
       const data = await res.json();
       const c = data.choices?.[0]?.message?.content;
