@@ -48,7 +48,7 @@ Clients and staff are in different countries, so money is handled per person and
 Everyone can see their own pay on **My pay**. Nobody except the admin can see anyone else's.
 
 ## Setup
-1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0011. Run 0003 on its own (it adds new role names).
+1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0012. Run 0003 on its own (it adds new role names).
 2. Supabase → Authentication → Sign In / Providers: enable Email, and turn **off** "Allow new users to sign up".
 3. Copy `.env.example` to `.env.local` and fill it in (see below).
 4. Create your own login in Supabase (Authentication → Users → Add user, tick auto-confirm), then run once in the SQL editor:
@@ -123,3 +123,7 @@ Every event is saved in the in-app bell (`/notifications`) and, if the person tu
 ## Invoices
 
 Invoices have a branded header, company seal, signature block and your terms and conditions (edit them under Settings).
+
+## Paying from the app
+
+Clients get a **Pay now** button on every unpaid invoice (their home page and the invoice page). Rupee invoices open a UPI payment link (Google Pay, PhonePe, Paytm…) with your UPI ID and the exact amount filled in, plus a QR code with the same details for scanning from another device. Every other currency opens WhatsApp with the message typed ("I need to finish the due… how should I pay my GBP to you?"). Set the UPI ID and WhatsApp number under Settings. Rupee invoices also print the QR code on the PDF. A client can tap **I've paid** (with an optional reference) which notifies the admin; the admin confirms and marks the invoice paid, because transfers can't be verified automatically.

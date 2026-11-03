@@ -1,6 +1,7 @@
-import { Circle, Document, Font, G, Page, Rect, StyleSheet, Svg, Text, View } from "@react-pdf/renderer";
+import { Circle, Document, Font, G, Page, Path, Rect, StyleSheet, Svg, Text, View } from "@react-pdf/renderer";
 import { PDF_FONTS } from "@/lib/pdf-fonts";
-import { formatMoneyPdf, sealRing, termsList, type InvoiceDoc } from "@/lib/invoice";
+import { formatMoneyPdf, isUpiId, sealRing, termsList, upiLink, type InvoiceDoc } from "@/lib/invoice";
+import { qrPath } from "@/lib/qr";
 
 // Anweo brand colours (from the brand sheet)
 const FOREST = "#0E5A44", FOREST_DEEP = "#0A4433", LIME = "#C9F25A", INK = "#141413", PAPER = "#F4F3EF", EDGE = "#E2E0D8", MUTE = "#6F6F69", RED = "#B42318";
@@ -114,6 +115,8 @@ export default function InvoicePdf({ doc }: { doc: InvoiceDoc }) {
   const co = doc.company;
   const contactBits = [co.email, co.phone, co.website].filter(Boolean).join("   ·   ");
   const terms = termsList(co.termsConditions);
+  const upi = !paid && doc.currency === "INR" && isUpiId(co.upiId);
+  const qr = upi ? qrPath(upiLink({ vpa: co.upiId!, name: co.upiName, amount: doc.amount, note: `Invoice ${doc.number}` })) : null;
 
   return (
     <Document title={`Invoice ${doc.number}`} author={co.legalName} subject={`Invoice for ${doc.client.name}`}>
@@ -169,10 +172,23 @@ export default function InvoicePdf({ doc }: { doc: InvoiceDoc }) {
           </View>
 
           <View style={s.totalsRow} wrap={false}>
-            {co.paymentDetails && !paid ? (
+            {!paid && (co.paymentDetails || upi) ? (
               <View style={s.payBox}>
                 <Text style={s.label}>How to pay</Text>
-                <Text style={{ fontSize: 9.5, lineHeight: 1.55 }}>{co.paymentDetails}</Text>
+                {co.paymentDetails ? <Text style={{ fontSize: 9.5, lineHeight: 1.55 }}>{co.paymentDetails}</Text> : null}
+                {upi && qr ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: co.paymentDetails ? 8 : 0 }}>
+                    <Svg width={62} height={62} viewBox={`-4 -4 ${qr.size + 8} ${qr.size + 8}`}>
+                      <Rect x={-4} y={-4} width={qr.size + 8} height={qr.size + 8} fill="#FFFFFF" />
+                      <Path d={qr.d} fill={INK} />
+                    </Svg>
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={{ fontSize: 8.5, fontWeight: 600 }}>Scan with any UPI app</Text>
+                      <Text style={s.dim}>Amount is filled in.</Text>
+                      <Text style={[s.dim, { fontFamily: "Mono", fontSize: 7.5 }]}>{co.upiId}</Text>
+                    </View>
+                  </View>
+                ) : null}
                 <Text style={[s.dim, { marginTop: 5 }]}>Quote {doc.number} as the payment reference.</Text>
               </View>
             ) : <View style={{ width: "50%" }} />}

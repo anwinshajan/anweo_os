@@ -360,7 +360,7 @@ async function ClientPortal({ me }: { me: Me }) {
                 <div key={i.id} className="row">
                   <div className="min-w-0"><p className="truncate">{i.period_label}</p>
                     <p className="font-mono text-[11px] text-mute">{i.status === "paid" ? `Paid ${fmtDate(i.paid_at)}` : `Due ${fmtDate(due)}`}</p></div>
-                  <span className="flex shrink-0 items-center gap-2"><span className="font-semibold">{money(i.amount, i.currency)}</span><span className={`pill ${statusPill(late ? "overdue" : i.status)}`}>{late ? "overdue" : i.status}</span><a href={`/invoices/${i.id}`} className="text-xs font-medium text-forest hover:underline">Invoice</a></span>
+                  <span className="flex shrink-0 items-center gap-2"><span className="font-semibold">{money(i.amount, i.currency)}</span><span className={`pill ${statusPill(late ? "overdue" : i.status)}`}>{late ? "overdue" : i.status}</span>{(i.status === "due" || i.status === "overdue") && <Link href={`/invoices/${i.id}/pay`} className="rounded-lg bg-lime px-2.5 py-1 text-xs font-semibold text-ink hover:bg-lime-deep">Pay now</Link>}<a href={`/invoices/${i.id}`} className="text-xs font-medium text-forest hover:underline">Invoice</a></span>
                 </div>
               );
             })}

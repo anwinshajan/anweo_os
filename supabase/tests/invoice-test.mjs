@@ -1,4 +1,4 @@
-import { invoiceNumber, formatMoneyPdf, termsSentence, fileNameFor, termsList, sealRing } from "../../src/lib/invoice.ts";
+import { invoiceNumber, formatMoneyPdf, termsSentence, fileNameFor, termsList, sealRing, upiLink, whatsappLink, whatsappPayMessage, isUpiId } from "../../src/lib/invoice.ts";
 let pass = 0, fail = 0;
 const ok = (n, c) => { c ? pass++ : fail++; console.log((c ? "PASS " : "FAIL ") + n); };
 
@@ -12,5 +12,11 @@ ok("terms without interest omit late wording", !termsSentence(7, 0, 0).includes(
 ok("file name", fileNameFor({ number: "ANW-0042" }) === "Anweo-Invoice-ANW-0042.pdf");
 ok("terms are split one clause per line, blanks dropped", termsList("A\n\n B \n").join("|") === "A|B" && termsList(null).length === 0);
 ok("seal text is centred on the ring and reads left to right", (() => { const t = sealRing("ABC", "top"); const b = sealRing("ABC", "bottom"); return t[0].rot < 0 && t[2].rot > 0 && Math.abs(t[0].rot + t[2].rot) < 1e-9 && b[0].rot > 0 && b[2].rot < 0; })());
+ok("UPI link carries payee, exact amount and currency", upiLink({ vpa: "anwin@okaxis", name: "Anwin Shajan", amount: 3000, note: "Invoice ANW-0001" }) === "upi://pay?pa=anwin@okaxis&pn=Anwin%20Shajan&am=3000.00&cu=INR&tn=Invoice%20ANW-0001");
+ok("UPI amount keeps two decimals", upiLink({ vpa: "a@b", amount: 1170.5, note: "x" }).includes("am=1170.50"));
+ok("UPI id check", isUpiId("name@okaxis") && !isUpiId("name") && !isUpiId("a b@c") && !isUpiId(null));
+ok("WhatsApp link is digits only with the message encoded", whatsappLink("+44 7123 456789", "Hi there?") === "https://wa.me/447123456789?text=Hi%20there%3F");
+ok("WhatsApp link needs a real number", whatsappLink("", "x") === null && whatsappLink("123", "x") === null && whatsappLink(null, "x") === null);
+ok("WhatsApp message names the currency", whatsappPayMessage({ number: "ANW-0004", currency: "GBP" }, "£150.00").includes("pay my GBP to you") && whatsappPayMessage({ number: "ANW-0004", currency: "GBP" }, "£150.00").includes("ANW-0004"));
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

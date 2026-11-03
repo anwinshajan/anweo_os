@@ -1,6 +1,7 @@
 "use server";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
+import { formatMoney } from "@/lib/currency";
 import { adminIds, clientUserIds, leadIds, notifyUsers, snip, staffIds } from "@/lib/notify";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -914,6 +915,7 @@ export const saveCompanySettingsAction = safe(async (form: FormData) => {
   const sb = await supabaseServer();
   const legal_name = str(form, "legal_name");
   if (!legal_name) throw new Error("Business name is required");
+  if (str(form, "upi_id") && !/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(str(form, "upi_id"))) throw new Error("That UPI ID doesn't look right. It should look like name@bank");
   const { error } = await sb.from("company_settings").upsert({
     id: 1,
     legal_name,
@@ -926,6 +928,9 @@ export const saveCompanySettingsAction = safe(async (form: FormData) => {
     payment_details: str(form, "payment_details") || null,
     invoice_note: str(form, "invoice_note") || null,
     terms_conditions: str(form, "terms_conditions") || null,
+    upi_id: str(form, "upi_id") || null,
+    upi_name: str(form, "upi_name") || null,
+    whatsapp_number: str(form, "whatsapp_number") || null,
   });
   if (error) throw new Error(error.message);
   revalidatePath("/settings");
@@ -1250,4 +1255,21 @@ export const deletePostMediaAction = safe(async (form: FormData) => {
   if (error) throw new Error(error.message);
   try { await supabaseAdmin().storage.from("documents").remove([m.storage_path]); } catch { /* ignore */ }
   revalidatePath(`/studio/${m.post_id}`); revalidatePath("/studio");
+});
+
+/* ------------------------------------------------------------ client payments */
+// A client says they've paid. We can't verify a UPI or bank transfer from here, so this tells the admin to check and mark it paid.
+export const reportPaymentAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  const id = str(form, "id");
+  const sb = await supabaseServer();
+  const { data: inv } = await sb.from("invoices").select("id,client_id,period_label,amount,currency,status,invoice_no,clients(business_name)").eq("id", id).single();
+  if (!inv) throw new Error("Invoice not found");
+  if (inv.status !== "due" && inv.status !== "overdue") throw new Error("This invoice isn't waiting for payment");
+  const ref = str(form, "reference").slice(0, 80);
+  const money = formatMoney(inv.amount, inv.currency);
+  const clientName = (inv.clients as unknown as { business_name: string } | null)?.business_name ?? "A client";
+  await logEvent(supabaseAdmin(), me.id, inv.client_id, "payment_reported", `${who(me)} says they paid ${money} for ${inv.period_label}${ref ? ` (ref ${ref})` : ""}`, false);
+  later(async () => notifyUsers(await adminIds(), { title: "Client says they've paid", body: snip(`${clientName} · ${money} · ${inv.period_label}${ref ? ` · ref ${ref}` : ""}`), url: "/transactions?type=income&status=due" }, me.id));
+  revalidatePath("/transactions");
 });

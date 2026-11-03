@@ -24,6 +24,9 @@ export default async function Settings() {
         <div className="sm:col-span-2"><label className="label">Address</label><textarea name="address" rows={3} defaultValue={f("address")} className="input" /></div>
         <div><label className="label">Tax number label</label><input name="tax_label" defaultValue={f("tax_label") || "Tax ID"} placeholder="VAT No. / GSTIN" className="input" /></div>
         <div><label className="label">Tax number</label><input name="tax_number" defaultValue={f("tax_number")} className="input" /></div>
+        <div><label className="label">UPI ID (for rupee invoices)</label><input name="upi_id" defaultValue={f("upi_id")} placeholder="name@bank" className="input" /></div>
+        <div><label className="label">Name on UPI</label><input name="upi_name" defaultValue={f("upi_name")} className="input" /></div>
+        <div className="sm:col-span-2"><label className="label">WhatsApp number for other currencies (with country code)</label><input name="whatsapp_number" defaultValue={f("whatsapp_number")} placeholder="+44 7xxx xxxxxx" className="input" /></div>
         <div className="sm:col-span-2"><label className="label">How to pay (bank / UPI details)</label><textarea name="payment_details" rows={4} defaultValue={f("payment_details")} className="input" /></div>
         <div className="sm:col-span-2"><label className="label">Note at the bottom</label><input name="invoice_note" defaultValue={f("invoice_note")} placeholder="Thank you for your business." className="input" /></div>
         <div className="sm:col-span-2"><label className="label">Terms &amp; conditions (one clause per line, printed on every invoice)</label><textarea name="terms_conditions" rows={8} defaultValue={f("terms_conditions")} className="input" /></div>

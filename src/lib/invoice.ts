@@ -12,7 +12,7 @@ export type InvoiceDoc = {
   amount: number;
   description: string;
   client: { name: string; contact: string | null; email: string | null; phone: string | null; address: string | null; taxId: string | null; country: string | null };
-  company: { legalName: string; address: string | null; email: string | null; phone: string | null; website: string | null; taxLabel: string; taxNumber: string | null; paymentDetails: string | null; note: string | null; termsConditions: string | null };
+  company: { legalName: string; address: string | null; email: string | null; phone: string | null; website: string | null; taxLabel: string; taxNumber: string | null; paymentDetails: string | null; note: string | null; termsConditions: string | null; upiId: string | null; upiName: string | null; whatsapp: string | null };
   terms: string;
 };
 
@@ -48,3 +48,22 @@ export function sealRing(text: string, where: "top" | "bottom", maxSpan = 150): 
   const span = step * (chars.length - 1);
   return chars.map((ch, i) => ({ ch, rot: where === "top" ? -span / 2 + i * step : span / 2 - i * step }));
 }
+
+// ---- paying
+const VPA = /^[\w.\-]{2,}@[\w.\-]{2,}$/;
+export const isUpiId = (v: string | null | undefined): v is string => !!v && VPA.test(v.trim());
+
+// A UPI payment link (opens GPay / PhonePe / Paytm with the payee and amount already filled in). Also the content of the QR code.
+export function upiLink(o: { vpa: string; name?: string | null; amount: number; note: string }): string {
+  const e = encodeURIComponent;
+  return `upi://pay?pa=${o.vpa.trim()}&pn=${e((o.name || "").trim())}&am=${Number(o.amount).toFixed(2)}&cu=INR&tn=${e(o.note.slice(0, 60))}`;
+}
+
+// A WhatsApp chat link with the message already typed. Returns null if the number isn't usable.
+export function whatsappLink(number: string | null | undefined, text: string): string | null {
+  const digits = (number ?? "").replace(/\D/g, "");
+  return digits.length >= 8 ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : null;
+}
+
+export const whatsappPayMessage = (doc: { number: string; currency: string }, amountText: string) =>
+  `Hi Anweo, I need to finish the due (invoice ${doc.number}, ${amountText}). How should I pay my ${doc.currency} to you?`;

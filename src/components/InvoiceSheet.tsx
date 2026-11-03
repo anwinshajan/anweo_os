@@ -1,6 +1,7 @@
 import { Logo } from "@/components/Logo";
 import { formatMoney } from "@/lib/currency";
-import { sealRing, termsList, type InvoiceDoc } from "@/lib/invoice";
+import QrSvg from "@/components/QrSvg";
+import { isUpiId, sealRing, termsList, upiLink, type InvoiceDoc } from "@/lib/invoice";
 
 const d = (iso: string) => new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -27,6 +28,7 @@ export default function InvoiceSheet({ doc }: { doc: InvoiceDoc }) {
   const paid = doc.status === "paid";
   const co = doc.company;
   const terms = termsList(co.termsConditions);
+  const upi = !paid && doc.currency === "INR" && isUpiId(co.upiId);
   return (
     <article className="invoice-sheet mx-auto w-full max-w-[820px] overflow-hidden rounded-xl2 border border-edge bg-white shadow-card print:max-w-none print:rounded-none print:border-0 print:shadow-none">
       <header className="flex items-center justify-between gap-4 bg-forest px-6 py-6 text-paper sm:px-11">
@@ -70,8 +72,18 @@ export default function InvoiceSheet({ doc }: { doc: InvoiceDoc }) {
           <div className="flex items-start justify-between gap-4 border-b border-edge px-4 py-4"><p className="font-semibold">{doc.description}</p><p className="whitespace-nowrap font-semibold">{formatMoney(doc.amount, doc.currency)}</p></div>
         </div>
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          {co.paymentDetails && !paid ? (
-            <div className="rounded-xl bg-paper p-4"><p className="tag mb-1.5 !text-forest">How to pay</p><p className="whitespace-pre-line text-sm">{co.paymentDetails}</p><p className="mt-1.5 text-xs text-mute">Quote {doc.number} as the payment reference.</p></div>
+          {!paid && (co.paymentDetails || upi) ? (
+            <div className="rounded-xl bg-paper p-4">
+              <p className="tag mb-1.5 !text-forest">How to pay</p>
+              {co.paymentDetails && <p className="whitespace-pre-line text-sm">{co.paymentDetails}</p>}
+              {upi && (
+                <div className="mt-2 flex items-center gap-3">
+                  <QrSvg text={upiLink({ vpa: co.upiId!, name: co.upiName, amount: doc.amount, note: `Invoice ${doc.number}` })} size={84} className="shrink-0 rounded-lg" />
+                  <div className="text-xs"><p className="text-sm font-semibold">Scan with any UPI app</p><p className="text-mute">Amount is filled in.</p><p className="font-mono text-mute">{co.upiId}</p></div>
+                </div>
+              )}
+              <p className="mt-1.5 text-xs text-mute">Quote {doc.number} as the payment reference.</p>
+            </div>
           ) : <div />}
           <div>
             <div className="flex justify-between px-1 pb-2 text-sm"><span className="text-mute">Subtotal</span><span>{formatMoney(doc.amount, doc.currency)}</span></div>
