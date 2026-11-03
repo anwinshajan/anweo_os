@@ -227,7 +227,9 @@ export async function GET(req: Request) {
   try {
     const r = await fetch(`${base}/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
     const t = await r.text();
-    out.models = { status: r.status, body: t.slice(0, 600) };
+    let list: unknown = t.slice(0, 600);
+    try { list = ((JSON.parse(t)?.data ?? []) as Record<string, unknown>[]).map((m) => ({ id: m.id, vision: m.vision, payg: m.payg_enabled, in_idr_per_1k: m.input_idr_per_1k, out_idr_per_1k: m.output_idr_per_1k, free: m.free ?? undefined })); } catch { /* keep raw text */ }
+    out.models = { status: r.status, count: Array.isArray(list) ? list.length : undefined, list };
   } catch (e) { out.models = { error: String(e).slice(0, 200) }; }
   void req;
   return NextResponse.json(out);
