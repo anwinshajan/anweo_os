@@ -9,9 +9,10 @@
     "lint": "next lint",
     "test:db": "node supabase/tests/rls-test.mjs",
     "test:currency": "node --experimental-strip-types supabase/tests/currency-test.mjs",
-    "test": "npm run test:db && npm run test:currency && npm run test:payments && npm run test:invoice && npm run test:automation",
+    "test": "npm run test:db && npm run test:currency && npm run test:payments && npm run test:invoice && npm run test:automation && npm run test:files",
     "test:invoice": "node --experimental-strip-types supabase/tests/invoice-test.mjs",
     "test:automation": "node --experimental-strip-types supabase/tests/automation-test.mjs",
+    "test:files": "node --experimental-strip-types supabase/tests/files-test.mjs",
     "test:payments": "node --experimental-strip-types supabase/tests/payments-test.mjs"
   },
   "dependencies": {

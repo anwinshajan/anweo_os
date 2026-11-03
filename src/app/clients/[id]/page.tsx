@@ -10,6 +10,7 @@ import HistoryTab from "./HistoryTab";
 import CalendarTab from "./CalendarTab";
 import MarketingTab from "./MarketingTab";
 import LeadsTab from "./LeadsTab";
+import FilesTab from "./FilesTab";
 import TemplatesSection from "./TemplatesSection";
 import { headers } from "next/headers";
 import CountryCurrency from "@/components/CountryCurrency";
@@ -30,13 +31,14 @@ const TABS = [
   { key: "calendar", label: "Calendar" },
   { key: "marketing", label: "Marketing" },
   { key: "leads", label: "Leads" },
+  { key: "files", label: "Files" },
   { key: "documents", label: "Documents" },
   { key: "work", label: "Work & content" },
   { key: "billing", label: "Billing", adminOnly: true },
   { key: "history", label: "History", adminOnly: true },
 ];
 
-export default async function ClientDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; m?: string }> }) {
+export default async function ClientDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; m?: string; f?: string }> }) {
   const me = await getMe();
   if (!me) redirect("/login");
   if (me.status !== "active" || me.role === "client") redirect("/");
@@ -96,6 +98,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
         {tab === "billing" && admin && <BillingTab id={id} client={client} />}
         {tab === "calendar" && <CalendarTab id={id} month={/^\d{4}-(0[1-9]|1[0-2])$/.test(sp.m ?? "") ? sp.m! : new Date().toISOString().slice(0, 7)} canEdit={lead || me.role === "social_manager" || me.role === "marketing" || me.role === "designer" || me.can_manage_social} />}
         {tab === "marketing" && <MarketingTab id={id} currency={client.currency} canEdit={lead || me.role === "social_manager" || me.role === "marketing" || me.role === "designer" || me.can_manage_social} origin={origin} />}
+        {tab === "files" && <FilesTab id={id} folder={sp.f ?? null} lead={lead} origin={origin} />}
         {tab === "leads" && <LeadsTab id={id} currency={client.currency} />}
         {tab === "history" && admin && <HistoryTab id={id} />}
       </div>

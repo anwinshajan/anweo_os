@@ -48,7 +48,7 @@ Clients and staff are in different countries, so money is handled per person and
 Everyone can see their own pay on **My pay**. Nobody except the admin can see anyone else's.
 
 ## Setup
-1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0015. Run 0003 on its own (it adds new role names).
+1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0016. Run 0003 on its own (it adds new role names).
 2. Supabase → Authentication → Sign In / Providers: enable Email, and turn **off** "Allow new users to sign up".
 3. Copy `.env.example` to `.env.local` and fill it in (see below).
 4. Create your own login in Supabase (Authentication → Users → Add user, tick auto-confirm), then run once in the SQL editor:
@@ -85,7 +85,7 @@ Push to GitHub and import into Vercel. Add the variables above under Settings �
 - Approving a post cannot be done by anyone below manager, even by calling the API directly.
 - Files are in a private bucket. The server checks the database permission first, then hands out a 60-second link.
 - Anweo AI reads data with the signed-in person's own access, so it can never see more than they can. It is rate limited to 30 questions an hour per person and cannot change anything.
-- 251 database checks, 11 currency, 29 payment-maths and 10 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
+- 270 database checks, 11 currency, 29 payment-maths and 10 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
 
 ## Branding
 Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141413`, paper `#F4F3EF`).
@@ -157,3 +157,7 @@ Managers set recurring tasks per client (weekly or monthly) in the Work tab. A d
 ## Website lead form
 
 `POST /api/leads/<client key>` (form or JSON: name, phone or email, message, source, optional redirect). It is public by design, protected by the long random key, a hidden spam trap, input limits and a rate limit; the client and the managers are notified.
+
+## Shared files
+
+Each client has a **Files** tab for links and folders (Google Drive, Dropbox, Figma, Canva and so on), so nothing uses this app's storage. Items are team-only by default. A teammate can **ask to share** a file or folder; a manager or the admin approves it (also listed on the Approvals page) and only then does the client see it on their dashboard. Editing something the client can already see sends it back for approval. A manager or admin can also create a **public link** (`/s/<token>`) that anyone can open without signing in, and turn it off at any time. Needs migration 0016.

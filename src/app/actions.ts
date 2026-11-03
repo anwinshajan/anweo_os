@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { formatMoney } from "@/lib/currency";
 import { pickAssignee } from "@/lib/automation";
+import { PROVIDERS, descendantIds, detectProvider, isMissingTable, newToken, normalizeUrl } from "@/lib/files";
 import { dueDateFor } from "@/lib/recurrence";
 import { adminIds, clientUserIds, leadIds, notifyUsers, snip, staffIds } from "@/lib/notify";
 import { revalidatePath } from "next/cache";
@@ -1625,4 +1626,119 @@ export const requestServiceAction = safe(async (form: FormData) => {
   await sb.from("ticket_messages").insert({ ticket_id: t.id, author_id: me.id, body: note || `I'd like to add ${svc.name}${pkg ? ` (${pkg.name} package)` : ""}. Please tell me the next steps.` });
   later(async () => notifyUsers(await leadIds(), { title: "A client wants a new service", body: snip(`${who(me)}: ${subject}`), url: `/tickets/${t.id}` }, me.id));
   revalidatePath("/tickets"); revalidatePath("/");
+});
+
+/* ------------------------------------------------------------ shared files (links) */
+const fileErr = (e: { code?: string; message: string }) => new Error(isMissingTable(e) ? "Shared files aren't switched on yet. Run the database update (migration 0016) in Supabase first." : e.message);
+const refreshFiles = (client_id: string) => { revalidatePath(`/clients/${client_id}`); revalidatePath("/"); revalidatePath("/approvals"); };
+
+async function fileRows(sb: Sb, client_id: string) {
+  const { data, error } = await sb.from("client_files").select("id,parent_id,kind,status,title,created_by").eq("client_id", client_id);
+  if (error) throw fileErr(error);
+  return data ?? [];
+}
+
+export const createFolderAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const title = str(form, "title").slice(0, 140);
+  if (!client_id || !title) throw new Error("Give the folder a name");
+  const { error } = await sb.from("client_files").insert({ client_id, parent_id: str(form, "parent_id") || null, kind: "folder", title, created_by: me.id });
+  if (error) throw fileErr(error);
+  refreshFiles(client_id);
+});
+
+export const addFileLinkAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const url = normalizeUrl(str(form, "url"));
+  if (!client_id) throw new Error("Client missing");
+  if (!url) throw new Error("Paste a working link, for example from Google Drive");
+  const title = str(form, "title").slice(0, 140) || PROVIDERS[detectProvider(url)] + " file";
+  const { error } = await sb.from("client_files").insert({ client_id, parent_id: str(form, "parent_id") || null, kind: "link", title, url, provider: detectProvider(url), notes: clip(form, "notes", 500), created_by: me.id });
+  if (error) throw fileErr(error);
+  refreshFiles(client_id);
+});
+
+export const updateFileAction = safe(async (form: FormData) => {
+  await requireStaff();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const patch: Record<string, unknown> = { title: str(form, "title").slice(0, 140), notes: clip(form, "notes", 500) };
+  if (!patch.title) throw new Error("The name can't be empty");
+  if (form.has("url")) { const url = normalizeUrl(str(form, "url")); if (!url) throw new Error("Paste a working link"); patch.url = url; patch.provider = detectProvider(url); }
+  const { data, error } = await sb.from("client_files").update(patch).eq("id", id).select("client_id,status").single();
+  if (error || !data) throw error ? fileErr(error) : new Error("File not found");
+  refreshFiles(data.client_id);
+});
+
+// A teammate says "this is ready for the client". A folder takes everything inside it that is still internal.
+export const submitFileAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const { data: item } = await sb.from("client_files").select("client_id,kind,title,status").eq("id", id).single();
+  if (!item) throw new Error("File not found");
+  const rows = await fileRows(sb, item.client_id);
+  const ids = [id, ...(item.kind === "folder" ? descendantIds(rows, id).filter((x) => rows.find((r) => r.id === x)?.status === "internal") : [])];
+  const { error } = await sb.from("client_files").update({ status: "pending" }).in("id", ids).eq("status", "internal");
+  if (error) throw fileErr(error);
+  later(async () => notifyUsers(await leadIds(), { title: "Files waiting to be shared with a client", body: snip(`${who(me)}: ${item.title}`), url: "/approvals" }, me.id));
+  refreshFiles(item.client_id);
+});
+
+// Manager or admin: share with the client. A folder shares itself and everything inside that was submitted.
+export const approveFileAction = safe(async (form: FormData) => {
+  const me = await requireLead();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const { data: item } = await sb.from("client_files").select("client_id,kind,title,created_by").eq("id", id).single();
+  if (!item) throw new Error("File not found");
+  const rows = await fileRows(sb, item.client_id);
+  const inside = item.kind === "folder" ? descendantIds(rows, id).filter((x) => rows.find((r) => r.id === x)?.status === "pending") : [];
+  const { error } = await sb.from("client_files").update({ status: "shared", approved_by: me.id }).in("id", [id, ...inside]);
+  if (error) throw fileErr(error);
+  later(async () => {
+    await notifyUsers(await clientUserIds(item.client_id), { title: "New files shared with you", body: snip(item.title), url: "/" });
+    await notifyUsers([item.created_by], { title: "Your files were shared with the client", body: snip(item.title), url: `/clients/${item.client_id}?tab=files` }, me.id);
+  });
+  refreshFiles(item.client_id);
+});
+
+// Back to team-only (stop sharing, or turn down a request). Everything inside a folder goes back too, and public links stop working.
+export const returnFileAction = safe(async (form: FormData) => {
+  const me = await requireLead();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const { data: item } = await sb.from("client_files").select("client_id,kind,title,status,created_by").eq("id", id).single();
+  if (!item) throw new Error("File not found");
+  const rows = await fileRows(sb, item.client_id);
+  const ids = [id, ...(item.kind === "folder" ? descendantIds(rows, id) : [])];
+  const { error } = await sb.from("client_files").update({ status: "internal", public_token: null, approved_by: null }).in("id", ids).neq("status", "internal");
+  if (error) throw fileErr(error);
+  if (item.status === "pending") later(() => notifyUsers([item.created_by], { title: "Not shared with the client yet", body: snip(item.title), url: `/clients/${item.client_id}?tab=files` }, me.id));
+  refreshFiles(item.client_id);
+});
+
+export const deleteFileAction = safe(async (form: FormData) => {
+  await requireStaff();
+  const sb = await supabaseServer();
+  const { data, error } = await sb.from("client_files").delete().eq("id", str(form, "id")).select("client_id").single();
+  if (error || !data) throw error ? fileErr(error) : new Error("That file can't be deleted (shared files can only be removed by a manager or the admin)");
+  refreshFiles(data.client_id);
+});
+
+// Anyone with the link can open a shared folder or file, without signing in. Turn it on or off.
+export const togglePublicLinkAction = safe(async (form: FormData) => {
+  await requireLead();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const { data: item } = await sb.from("client_files").select("client_id,status,public_token").eq("id", id).single();
+  if (!item) throw new Error("File not found");
+  if (item.status !== "shared") throw new Error("Share it with the client first");
+  const { error } = await sb.from("client_files").update({ public_token: item.public_token ? null : newToken() }).eq("id", id);
+  if (error) throw fileErr(error);
+  refreshFiles(item.client_id);
 });

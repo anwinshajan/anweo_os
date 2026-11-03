@@ -20,6 +20,7 @@ const sql12 = mig("0012_payment_options.sql");
 const sql13 = mig("0013_tickets_updates.sql");
 const sql14 = mig("0014_history_admin_edit.sql");
 const sql15 = mig("0015_marketing_suite.sql");
+const sql16 = mig("0016_client_files.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -45,6 +46,7 @@ await db.exec(sql12);
 await db.exec(sql13);
 await db.exec(sql14);
 await db.exec(sql15);
+await db.exec(sql16);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -771,6 +773,55 @@ await as(sm, async () => {
   ok("only managers create recurring tasks", b);
 });
 await as(cA, async () => { ok("clients cannot see recurring tasks", (await q(`select id from task_templates`)).rows.length === 0); });
+
+// =================== PHASE 7: shared files ===================
+let fFolder, fLink, fOther;
+await as(sm, async () => {
+  fFolder = (await q(`insert into client_files(client_id, kind, title, created_by) values ('${clA}', 'folder', 'Website assets', '${sm}') returning id`)).rows[0].id;
+  fLink = (await q(`insert into client_files(client_id, parent_id, kind, title, url, provider, created_by) values ('${clA}', '${fFolder}', 'link', 'Logo pack', 'https://drive.google.com/x', 'google_drive', '${sm}') returning id`)).rows[0].id;
+  ok("the social team can add folders and links", !!fFolder && !!fLink);
+  let b = false; try { await q(`insert into client_files(client_id, kind, title, url) values ('${clA}', 'link', 'bad', 'http://insecure.example')`); } catch { b = true; }
+  ok("links must be https", b);
+  b = false; try { await q(`insert into client_files(client_id, kind, title) values ('${clA}', 'link', 'no url')`); } catch { b = true; }
+  ok("a link needs an address", b);
+  b = false; try { await q(`insert into client_files(client_id, parent_id, kind, title, url) values ('${clB}', '${fFolder}', 'link', 'wrong client', 'https://x.example')`); } catch { b = true; }
+  ok("a file cannot go in another client's folder", b);
+  b = false; try { await q(`insert into client_files(client_id, kind, title, status) values ('${clA}', 'folder', 'sneaky', 'shared')`); } catch { b = true; }
+  ok("a team member cannot create something already shared", b);
+  const u = await q(`update client_files set status='pending' where id='${fLink}'`);
+  ok("a team member can ask for it to be shared", (u.affectedRows ?? u.rowCount) === 1);
+  b = false; try { await q(`update client_files set status='shared' where id='${fLink}'`); } catch { b = true; }
+  ok("a team member cannot share with the client themselves", b);
+});
+await as(cA, async () => { ok("a client sees nothing until it is shared", (await q(`select id from client_files`)).rows.length === 0); });
+await as(mgr, async () => {
+  const u = await q(`update client_files set status='shared', approved_by='${mgr}' where id in ('${fFolder}','${fLink}')`);
+  ok("a manager can approve sharing", (u.affectedRows ?? u.rowCount) === 2);
+});
+await as(cA, async () => {
+  ok("the client now sees what was shared", (await q(`select id from client_files`)).rows.length === 2);
+  let b = false; try { await q(`insert into client_files(client_id, kind, title, url) values ('${clA}', 'link', 'mine', 'https://x.example')`); } catch { b = true; }
+  ok("a client cannot add files", b);
+  const u = await q(`update client_files set title='hacked' where id='${fLink}'`);
+  ok("a client cannot edit shared files", (u.affectedRows ?? u.rowCount ?? 0) === 0);
+});
+await as(cB, async () => { ok("another client sees none of it", (await q(`select id from client_files`)).rows.length === 0); });
+await as(sm, async () => {
+  await q(`update client_files set title='Logo pack v2' where id='${fLink}'`);
+  const r = (await q(`select status from client_files where id='${fLink}'`)).rows[0];
+  ok("editing a shared file sends it back for approval", r.status === "pending");
+  let b = false; try { await q(`update client_files set public_token='abc' where id='${fLink}'`); } catch { b = true; }
+  ok("a team member cannot make a public link", b);
+  const d = await q(`delete from client_files where id='${fFolder}'`);
+  ok("a team member cannot delete something shared", (d.affectedRows ?? d.rowCount ?? 0) === 0);
+});
+await as(cA, async () => { ok("the client no longer sees the edited file", (await q(`select id from client_files`)).rows.length === 1); });
+await as(admin, async () => {
+  const u = await q(`update client_files set public_token='tok123' where id='${fFolder}'`);
+  ok("the admin can make a public link", (u.affectedRows ?? u.rowCount) === 1);
+  const d = await q(`delete from client_files where id='${fFolder}'`);
+  ok("the admin can delete a folder and everything in it", (d.affectedRows ?? d.rowCount) === 1 && (await q(`select id from client_files`)).rows.length === 0);
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

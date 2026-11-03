@@ -5,6 +5,7 @@ import PostThumb from "@/components/PostThumb";
 import LeadsPanel from "@/components/LeadsPanel";
 import MonthCalendar, { type CalPost } from "@/components/MonthCalendar";
 import RequestServices from "@/components/RequestServices";
+import SharedFiles from "@/components/SharedFiles";
 import Shell, { Empty, PageHead, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import { Corner, Logo } from "@/components/Logo";
 import { signDocumentAction } from "./actions";
@@ -141,6 +142,7 @@ async function ClientPortal({ me, m }: { me: Me; m?: string }) {
   const invById = new Map((invoices ?? []).map((i) => [i.id, i]));
   const { data: updatesAll } = await sb.from("project_updates").select("id,project_id,body,created_at").in("project_id", (projects ?? []).map((p: any) => p.id).concat(["00000000-0000-0000-0000-000000000000"])).order("created_at", { ascending: false });
   const { data: myLeads } = await sb.from("leads").select("id,name,phone,email,source,status,value,notes,created_at").eq("client_id", cid).order("created_at", { ascending: false }).limit(100);
+  const { data: sharedFiles } = await sb.from("client_files").select("id,parent_id,kind,title,url,provider,notes,status").eq("client_id", cid); // empty until the files update has been run
   const { data: svcAll } = await sb.from("services").select("id,name,description").eq("active", true).order("sort_order");
   const { data: pkgAll } = await sb.from("packages").select("id,service_id,name,price_monthly,currency,prices").eq("active", true).order("price_monthly");
   const calMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(m ?? "") ? m! : new Date().toISOString().slice(0, 7);
@@ -374,6 +376,13 @@ async function ClientPortal({ me, m }: { me: Me; m?: string }) {
           ))}
         </div>
       </section>
+
+      {(sharedFiles ?? []).length > 0 && (
+        <section className="card">
+          <p className="tag mb-3">[ Shared files ]</p>
+          <SharedFiles rows={sharedFiles ?? []} />
+        </section>
+      )}
 
       <section className="card">
         <p className="tag mb-3">[ Your content calendar ]</p>

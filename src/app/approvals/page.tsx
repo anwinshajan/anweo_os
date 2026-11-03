@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Form from "@/components/Form";
 import Shell, { Empty, PageHead, label, statusPill } from "@/components/Shell";
-import { reviewPostAction } from "@/app/actions";
+import { approveFileAction, returnFileAction, reviewPostAction } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ export default async function Approvals() {
   const social = lead || me.role === "social_manager" || me.can_manage_social;
   const sb = await supabaseServer();
 
+  const { data: pendingFiles } = lead ? await sb.from("client_files").select("id,client_id,kind,title,url,provider,clients(business_name)").eq("status", "pending").order("created_at") : { data: [] as any[] };
   const [{ data: waiting }, { data: ready }] = await Promise.all([
     sb.from("social_posts").select("id,kind,platform,caption,scheduled_at,clients(business_name)").eq("status", "awaiting_approval").order("scheduled_at", { nullsFirst: false }),
     sb.from("social_posts").select("id,kind,platform,caption,scheduled_at,status,clients(business_name)").in("status", ["approved", "scheduled"]).order("scheduled_at", { nullsFirst: false }),
@@ -24,6 +25,23 @@ export default async function Approvals() {
     <Shell me={me}>
       <PageHead tag="Content" title="Approvals" sub="Review what the team prepared. Approve it, then post it and mark it as posted so the client sees it." />
       {!lead && <p className="mb-5 rounded-xl bg-forest-soft px-4 py-3 text-sm text-forest">Only admins and managers can approve posts. {social ? "Once a post is approved, you can mark it as posted." : "You can see the queue below."}</p>}
+
+      {lead && (pendingFiles ?? []).length > 0 && (
+        <section className="mb-8">
+          <p className="tag mb-3">[ Files waiting to be shared with clients · {pendingFiles?.length} ]</p>
+          <div className="space-y-2">
+            {(pendingFiles ?? []).map((f: any) => (
+              <div key={f.id} className="card flex flex-wrap items-center justify-between gap-3 !p-4">
+                <div className="min-w-0"><p className="truncate font-semibold">{f.title}</p><p className="font-mono text-[11px] uppercase text-mute">{f.clients?.business_name} · {f.kind}{f.url ? <> · <a href={f.url} target="_blank" rel="noreferrer noopener" className="normal-case text-forest hover:underline">open</a></> : ""}</p></div>
+                <div className="flex gap-2">
+                  <Form action={approveFileAction} quiet><input type="hidden" name="id" value={f.id} /><button className="btn-primary !py-2">Share with client</button></Form>
+                  <Form action={returnFileAction} quiet><input type="hidden" name="id" value={f.id} /><button className="btn-danger !py-2">Not yet</button></Form>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mb-8">
         <p className="tag mb-3">[ Waiting for approval · {waiting?.length ?? 0} ]</p>
