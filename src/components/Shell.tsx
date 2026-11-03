@@ -16,6 +16,7 @@ export function navFor(me: Me): NavItem[] {
       { href: "/", label: "Home", icon: "home" },
       { href: "/chat", label: "Chat", icon: "chat" },
       { href: "/chat/ai", label: "Anweo AI", icon: "ai" },
+      { href: "/tickets", label: "Support", icon: "tickets" },
       { href: "/account", label: "Account", icon: "account" },
     ];
   }
@@ -26,9 +27,10 @@ export function navFor(me: Me): NavItem[] {
     { href: "/tasks", label: "Tasks", icon: "tasks" },
     { href: "/chat", label: "Chat", icon: "chat" },
     { href: "/studio", label: "Studio", icon: "studio" },
+    { href: "/tickets", label: "Tickets", icon: "tickets" },
     { href: "/approvals", label: "Approvals", icon: "approvals" },
     { href: "/clock", label: "Clock", icon: "clock", more: true },
-    ...(lead ? [{ href: "/catalogue", label: "Services", icon: "catalogue" } as NavItem] : []),
+    ...(lead ? [{ href: "/catalogue", label: "Services", icon: "catalogue", more: true } as NavItem] : []),
     ...(admin ? [{ href: "/finance", label: "Finance", icon: "finance" } as NavItem] : []),
     ...(admin ? [{ href: "/transactions", label: "Transactions", icon: "transactions" } as NavItem] : []),
     ...(admin ? [{ href: "/team", label: "Team", icon: "team" } as NavItem] : []),
@@ -58,6 +60,7 @@ export default function Shell({ me, children }: { me: Me; children: React.ReactN
           <Link href="/" aria-label="Anweo home"><Logo /></Link>
           <TopNav items={all.filter((i) => !i.more)} />
           <div className="flex items-center gap-2.5">
+            <Link href="/search" aria-label="Search" className="flex h-9 w-9 items-center justify-center rounded-full border border-edge bg-white text-ink/70 hover:border-forest/40"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4-4" /></svg></Link>
             <Suspense fallback={<span className="h-9 w-9" />}><Bell /></Suspense>
             <Link href="/account" className="flex items-center gap-2.5" aria-label="My account">
               <div className="hidden text-right leading-tight sm:block">

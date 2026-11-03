@@ -1273,3 +1273,119 @@ export const reportPaymentAction = safe(async (form: FormData) => {
   later(async () => notifyUsers(await adminIds(), { title: "Client says they've paid", body: snip(`${clientName} · ${money} · ${inv.period_label}${ref ? ` · ref ${ref}` : ""}`), url: "/transactions?type=income&status=due" }, me.id));
   revalidatePath("/transactions");
 });
+
+/* ------------------------------------------------------------ support tickets */
+const TICKET_CATEGORIES = ["support", "change_request", "new_service", "billing", "other"];
+const TICKET_STATUSES = ["open", "in_progress", "waiting_client", "resolved", "closed"];
+const TICKET_PRIORITIES = ["low", "normal", "high", "urgent"];
+
+export const createTicketAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  const sb = await supabaseServer();
+  const isClient = me.role === "client";
+  const client_id = isClient ? me.client_id : str(form, "client_id");
+  if (!client_id) throw new Error(isClient ? "Your account isn't linked to a client yet" : "Pick the client this is for");
+  const subject = str(form, "subject");
+  const body = str(form, "body");
+  if (subject.length < 3) throw new Error("Give the ticket a short title");
+  if (!body) throw new Error("Describe what you need");
+  const category = TICKET_CATEGORIES.includes(str(form, "category")) ? str(form, "category") : "support";
+  const priority = isClient ? (form.get("urgent") === "on" ? "high" : "normal") : (TICKET_PRIORITIES.includes(str(form, "priority")) ? str(form, "priority") : "normal");
+  const project_id = str(form, "project_id") || null;
+  const { data: t, error } = await sb.from("tickets").insert({ client_id, project_id, subject: subject.slice(0, 140), category, priority, created_by: me.id }).select("id,ticket_no").single();
+  if (error || !t) throw new Error(error?.message ?? "Could not create the ticket");
+  const { error: mErr } = await sb.from("ticket_messages").insert({ ticket_id: t.id, author_id: me.id, body: body.slice(0, 4000) });
+  if (mErr) throw new Error(mErr.message);
+  const label = `#${String(t.ticket_no).padStart(4, "0")} ${subject}`;
+  if (isClient) later(async () => notifyUsers(await leadIds(), { title: "New support ticket", body: snip(`${who(me)}: ${label}`), url: `/tickets/${t.id}` }, me.id));
+  else later(async () => notifyUsers(await clientUserIds(client_id), { title: "We opened a ticket for you", body: snip(label), url: `/tickets/${t.id}` }, me.id));
+  revalidatePath("/tickets");
+  redirect(`/tickets/${t.id}`);
+});
+
+export const replyTicketAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  const sb = await supabaseServer();
+  const ticket_id = str(form, "ticket_id");
+  const body = str(form, "body").slice(0, 4000);
+  if (!body) throw new Error("Write a reply first");
+  const { data: t } = await sb.from("tickets").select("id,ticket_no,subject,client_id,status,assigned_to").eq("id", ticket_id).single();
+  if (!t) throw new Error("Ticket not found");
+  const isClient = me.role === "client";
+  const internal = !isClient && form.get("internal") === "on";
+  const { error } = await sb.from("ticket_messages").insert({ ticket_id, author_id: me.id, body, internal });
+  if (error) throw new Error(error.message);
+  const label = `#${String(t.ticket_no).padStart(4, "0")} ${t.subject}`;
+  if (isClient) {
+    if (t.status === "resolved" || t.status === "closed" || t.status === "waiting_client") await sb.from("tickets").update({ status: "open" }).eq("id", ticket_id);
+    later(async () => notifyUsers([t.assigned_to, ...(t.assigned_to ? [] : await leadIds())], { title: "Client replied", body: snip(`${label}: ${body}`), url: `/tickets/${ticket_id}` }, me.id));
+  } else if (!internal) {
+    const after = str(form, "set_status");
+    if (TICKET_STATUSES.includes(after) && after !== t.status) await sb.from("tickets").update({ status: after }).eq("id", ticket_id);
+    later(async () => notifyUsers(await clientUserIds(t.client_id), { title: after === "resolved" ? "Your ticket was resolved" : "New reply on your ticket", body: snip(`${label}: ${body}`), url: `/tickets/${ticket_id}` }, me.id));
+  }
+  revalidatePath(`/tickets/${ticket_id}`); revalidatePath("/tickets");
+});
+
+// Staff: change status, priority or who is handling it.
+export const updateTicketAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const status = str(form, "status");
+  const priority = str(form, "priority");
+  if (!TICKET_STATUSES.includes(status) || !TICKET_PRIORITIES.includes(priority)) throw new Error("Pick a valid status and priority");
+  const assignee = str(form, "assigned_to") || null;
+  const { data: before } = await sb.from("tickets").select("status,assigned_to,client_id,ticket_no,subject").eq("id", id).single();
+  if (!before) throw new Error("Ticket not found");
+  const { error } = await sb.from("tickets").update({ status, priority, assigned_to: assignee }).eq("id", id);
+  if (error) throw new Error(error.message);
+  const label = `#${String(before.ticket_no).padStart(4, "0")} ${before.subject}`;
+  if (assignee && assignee !== before.assigned_to) later(() => notifyUsers([assignee], { title: "A ticket was assigned to you", body: snip(label), url: `/tickets/${id}` }, me.id));
+  if (status !== before.status && (status === "resolved" || status === "in_progress")) later(async () => notifyUsers(await clientUserIds(before.client_id), { title: status === "resolved" ? "Your ticket was resolved" : "We're working on your ticket", body: snip(label), url: `/tickets/${id}` }, me.id));
+  revalidatePath(`/tickets/${id}`); revalidatePath("/tickets");
+});
+
+// Client: close a ticket that's sorted, or reopen one that isn't.
+export const clientTicketStatusAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const status = str(form, "status") === "closed" ? "closed" : "open";
+  const { data: t, error } = await sb.from("tickets").update({ status }).eq("id", id).select("ticket_no,subject").single();
+  if (error || !t) throw new Error(error?.message ?? "Ticket not found");
+  if (me.role === "client" && status === "open") later(async () => notifyUsers(await leadIds(), { title: "A client reopened a ticket", body: snip(`#${String(t.ticket_no).padStart(4, "0")} ${t.subject}`), url: `/tickets/${id}` }, me.id));
+  revalidatePath(`/tickets/${id}`); revalidatePath("/tickets");
+});
+
+export const deleteTicketAction = safe(async (form: FormData) => {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("tickets").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/tickets");
+  redirect("/tickets");
+});
+
+/* ------------------------------------------------------------ project updates */
+export const postProjectUpdateAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const project_id = str(form, "project_id");
+  const body = str(form, "body").slice(0, 2000);
+  if (!body) throw new Error("Write the update first");
+  const { data: p } = await sb.from("projects").select("title,client_id,visible_to_client").eq("id", project_id).single();
+  if (!p) throw new Error("Project not found");
+  const { error } = await sb.from("project_updates").insert({ project_id, author_id: me.id, body });
+  if (error) throw new Error(error.message);
+  if (p.visible_to_client) later(async () => notifyUsers(await clientUserIds(p.client_id), { title: `Update: ${p.title}`, body: snip(body), url: "/" }, me.id));
+  revalidatePath(`/clients/${p.client_id}`); revalidatePath("/");
+});
+
+export const deleteProjectUpdateAction = safe(async (form: FormData) => {
+  await requireStaff();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("project_updates").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${str(form, "client_id")}`); revalidatePath("/");
+});

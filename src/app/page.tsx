@@ -41,11 +41,12 @@ async function StaffHome({ me, q, archived }: { me: Me; q: string; archived: boo
   let clientQuery = sb.from("clients").select("id,business_name,contact_name,country,status").eq("status", archived ? "archived" : "active").order("created_at", { ascending: false });
   if (term) clientQuery = clientQuery.ilike("business_name", `%${term}%`);
 
-  const [{ data: clients }, { data: subs }, { count: pending }, { count: myTasks }, { data: due }] = await Promise.all([
+  const [{ data: clients }, { data: subs }, { count: pending }, { count: myTasks }, { count: openTix }, { data: due }] = await Promise.all([
     clientQuery,
     sb.from("client_services").select("client_id,price_monthly,currency,status,services(name)").eq("status", "active"),
     sb.from("social_posts").select("id", { count: "exact", head: true }).eq("status", "awaiting_approval"),
     sb.from("work_items").select("id", { count: "exact", head: true }).eq("assignee", me.id).neq("status", "done"),
+    sb.from("tickets").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress", "waiting_client"]),
     admin ? sb.from("invoices").select("amount,currency,status").in("status", ["due", "overdue"]) : Promise.resolve({ data: [] as { amount: number; currency: string; status: string }[] }),
   ]);
 
@@ -58,10 +59,11 @@ async function StaffHome({ me, q, archived }: { me: Me; q: string; archived: boo
         {lead && <Link href="/clients/new" className="btn-primary">+ Add client</Link>}
       </PageHead>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat tag="Clients" value={String(clients?.length ?? 0)} />
         <Stat tag="Needs approval" value={String(pending ?? 0)} href="/approvals" hot={(pending ?? 0) > 0} />
         <Stat tag="My open tasks" value={String(myTasks ?? 0)} href="/tasks" />
+        <Stat tag="Open tickets" value={String(openTix ?? 0)} href="/tickets" hot={(openTix ?? 0) > 0} />
         {admin ? (
           <Stat tag="Outstanding" value={<Totals t={totals(due ?? [])} />} href="/finance" hot={(due ?? []).length > 0} green />
         ) : (
@@ -134,6 +136,9 @@ async function ClientPortal({ me }: { me: Me }) {
   const todayIso = isoDay();
   const terms = client?.payment_terms_days ?? 7;
   const invById = new Map((invoices ?? []).map((i) => [i.id, i]));
+  const { data: updatesAll } = await sb.from("project_updates").select("id,project_id,body,created_at").in("project_id", (projects ?? []).map((p: any) => p.id).concat(["00000000-0000-0000-0000-000000000000"])).order("created_at", { ascending: false });
+  const { data: myTickets } = await sb.from("tickets").select("id,ticket_no,subject,status,updated_at").order("updated_at", { ascending: false }).limit(5);
+  const openTickets = (myTickets ?? []).filter((t) => t.status !== "resolved" && t.status !== "closed");
   const lateRate = Number(client?.late_interest_percent ?? 0);
 
   const activeSubs = (subs ?? []).filter((s: any) => s.status === "active");
@@ -191,6 +196,14 @@ async function ClientPortal({ me }: { me: Me }) {
         </div>
       </section>
 
+      <section className="card flex flex-wrap items-center justify-between gap-3 !p-4">
+        <div className="min-w-0">
+          <p className="font-semibold">Need something fixed, changed or built?</p>
+          <p className="text-sm text-mute">{openTickets.length > 0 ? <>You have {openTickets.length} open ticket{openTickets.length === 1 ? "" : "s"}. <Link href={`/tickets/${openTickets[0].id}`} className="font-medium text-forest hover:underline">Latest: {openTickets[0].subject}</Link></> : "Raise a ticket and the team will reply here."}</p>
+        </div>
+        <Link href="/tickets" className="btn-ghost">{openTickets.length > 0 ? "View tickets" : "Raise a ticket"}</Link>
+      </section>
+
       {toSign.length > 0 && (
         <section className="card !border-lime !bg-lime-soft">
           <p className="tag !text-forest">[ Needs your attention ]</p>
@@ -230,6 +243,16 @@ async function ClientPortal({ me }: { me: Me }) {
                 {p.description && <p className="mt-2 text-sm text-ink/70">{p.description}</p>}
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-forest-soft"><div className="h-full rounded-full bg-lime-deep" style={{ width: `${ppct}%` }} /></div>
                 <p className="mt-1 font-mono text-[11px] text-mute">{ppct}% complete{ms.length ? ` · ${done}/${ms.length} milestones` : ""}</p>
+                {(updatesAll ?? []).filter((u: any) => u.project_id === p.id).length > 0 && (
+                  <div className="mt-3 rounded-xl bg-white p-3">
+                    <p className="tag mb-1.5 !text-forest">Latest updates</p>
+                    <div className="space-y-2">
+                      {(updatesAll ?? []).filter((u: any) => u.project_id === p.id).slice(0, 3).map((u: any) => (
+                        <div key={u.id} className="text-sm"><p className="font-mono text-[10px] text-mute">{fmtDate(u.created_at, true)}</p><p className="whitespace-pre-wrap text-ink/85">{u.body}</p></div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {ms.length > 0 && (
                   <ul className="mt-3 space-y-1.5 text-sm">
                     {ms.map((m: any) => (

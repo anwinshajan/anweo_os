@@ -17,6 +17,7 @@ const sql9 = mig("0009_project_payment_link.sql");
 const sql10 = mig("0010_notifications_clock_studio.sql");
 const sql11 = mig("0011_social_team_access.sql");
 const sql12 = mig("0012_payment_options.sql");
+const sql13 = mig("0013_tickets_updates.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -39,6 +40,7 @@ await db.exec(sql9);
 await db.exec(sql10);
 await db.exec(sql11);
 await db.exec(sql12);
+await db.exec(sql13);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -615,6 +617,70 @@ await as(mgr, async () => {
   ok("a manager can edit approved content without losing approval", (await q(`select status from social_posts where id='${ap}'`)).rows[0].status === "approved");
 });
 await as(cA, async () => { ok("client sees it again once approved", (await q(`select id from social_posts where id='${ap}'`)).rows.length === 1); });
+
+// =================== PHASE 4: tickets and project updates ===================
+let tA, tB;
+await as(cA, async () => {
+  tA = (await q(`insert into tickets(client_id, subject, created_by) values ('${clA}', 'Logo is blurry', '${cA}') returning id`)).rows[0].id;
+  ok("a client can raise a ticket", !!tA);
+  let b = false; try { await q(`insert into tickets(client_id, subject, created_by) values ('${clB}', 'sneaky', '${cA}')`); } catch { b = true; }
+  ok("a client cannot raise a ticket for another client", b);
+  b = false; try { await q(`insert into tickets(client_id, subject, created_by) values ('${clA}', 'x', '${cA}')`); } catch { b = true; }
+  ok("a ticket needs a real subject", b);
+});
+tB = (await q(`insert into tickets(client_id, subject, created_by) values ('${clB}', 'B ticket', '${cB}') returning id`)).rows[0].id;
+await as(cA, async () => {
+  ok("a client sees only their own tickets", (await q(`select id from tickets`)).rows.length === 1);
+  await q(`insert into ticket_messages(ticket_id, author_id, body) values ('${tA}', '${cA}', 'It looks fuzzy on mobile')`);
+  ok("a client can write on their ticket", true);
+  let b = false; try { await q(`insert into ticket_messages(ticket_id, author_id, body, internal) values ('${tA}', '${cA}', 'secret', true)`); } catch { b = true; }
+  ok("a client cannot write internal notes", b);
+  b = false; try { await q(`insert into ticket_messages(ticket_id, author_id, body) values ('${tB}', '${cA}', 'hello')`); } catch { b = true; }
+  ok("a client cannot write on another client's ticket", b);
+  b = false; try { await q(`insert into ticket_messages(ticket_id, author_id, body) values ('${tA}', '${mgr}', 'forged')`); } catch { b = true; }
+  ok("a client cannot write as someone else", b);
+  b = false; try { await q(`update tickets set priority = 'urgent' where id='${tA}'`); } catch { b = true; }
+  ok("a client cannot change a ticket's priority", b);
+  b = false; try { await q(`update tickets set status = 'resolved' where id='${tA}'`); } catch { b = true; }
+  ok("a client cannot mark their own ticket resolved", b);
+  const u = await q(`update tickets set status = 'closed' where id='${tA}'`);
+  ok("a client can close their own ticket", (u.affectedRows ?? u.rowCount) === 1);
+  const r = await q(`update tickets set status = 'open' where id='${tA}'`);
+  ok("a client can reopen it", (r.affectedRows ?? r.rowCount) === 1);
+});
+await as(sm, async () => {
+  ok("staff see every ticket", (await q(`select id from tickets`)).rows.length === 2);
+  await q(`insert into ticket_messages(ticket_id, author_id, body, internal) values ('${tA}', '${sm}', 'Check the export size', true)`);
+  await q(`insert into ticket_messages(ticket_id, author_id, body) values ('${tA}', '${sm}', 'Thanks, we are on it')`);
+  ok("staff can reply and leave internal notes", (await q(`select id from ticket_messages where ticket_id='${tA}'`)).rows.length === 3);
+  await q(`update tickets set status='in_progress', priority='high', assigned_to='${sm}' where id='${tA}'`);
+  ok("staff can triage a ticket", (await q(`select status, priority from tickets where id='${tA}'`)).rows[0].priority === "high");
+  await q(`update tickets set status='resolved' where id='${tA}'`);
+  ok("resolving stamps the time", (await q(`select resolved_at from tickets where id='${tA}'`)).rows[0].resolved_at !== null);
+});
+await as(cA, async () => {
+  const m = (await q(`select body from ticket_messages where ticket_id='${tA}'`)).rows.map((x) => x.body);
+  ok("the client sees replies but never internal notes", m.length === 2 && !m.includes("Check the export size"));
+});
+await as(admin, async () => { const d = await q(`delete from tickets where id='${tB}'`); ok("admin can delete a ticket", (d.affectedRows ?? d.rowCount) === 1); });
+await as(sm, async () => { const d = await q(`delete from tickets where id='${tA}'`); ok("staff cannot delete tickets", (d.affectedRows ?? d.rowCount ?? 0) === 0); });
+
+// project updates: only for projects the client can see
+const pv = (await q(`insert into projects(client_id, title, visible_to_client) values ('${clA}', 'Site build', true) returning id`)).rows[0].id;
+const ph = (await q(`insert into projects(client_id, title, visible_to_client) values ('${clA}', 'Internal R&D', false) returning id`)).rows[0].id;
+await as(mgr, async () => {
+  await q(`insert into project_updates(project_id, author_id, body) values ('${pv}', '${mgr}', 'Homepage design is ready for review'), ('${ph}', '${mgr}', 'internal only')`);
+  ok("staff can post project updates", true);
+  let b = false; try { await q(`insert into project_updates(project_id, author_id, body) values ('${pv}', '${sm}', 'forged')`); } catch { b = true; }
+  ok("updates cannot be posted as someone else", b);
+});
+await as(cA, async () => {
+  const u = (await q(`select body from project_updates`)).rows;
+  ok("a client sees updates only for projects shared with them", u.length === 1 && u[0].body.startsWith("Homepage"));
+  let b = false; try { await q(`insert into project_updates(project_id, author_id, body) values ('${pv}', '${cA}', 'hi')`); } catch { b = true; }
+  ok("a client cannot post project updates", b);
+});
+await as(cB, async () => { ok("another client sees none of them", (await q(`select id from project_updates`)).rows.length === 0); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -4,9 +4,10 @@ import DeleteButton from "@/components/DeleteButton";
 import CurrencySelect from "@/components/CurrencySelect";
 import { Empty, fmtDate, label, money, statusPill } from "@/components/Shell";
 import {
-  addMilestoneAction, createProjectAction, deleteMilestoneAction, deleteProjectAction,
+  addMilestoneAction, createProjectAction, deleteMilestoneAction, deleteProjectAction, deleteProjectUpdateAction, postProjectUpdateAction,
   setProjectStatusAction, toggleMilestoneAction, updateProjectAction,
 } from "@/app/actions";
+import LocalTime from "@/components/LocalTime";
 import { supabaseServer } from "@/lib/supabase-server";
 import { isoDay } from "@/lib/payments";
 
@@ -18,6 +19,9 @@ export default async function ProjectsTab({ id, admin, client }: { id: string; a
   const { data: plans } = admin
     ? await sb.from("payment_plans").select("project_id,total_amount,currency,plan_installments(label,invoice_id,invoices(status))").not("project_id", "is", null).eq("client_id", id)
     : { data: [] as any[] };
+  const { data: updates } = await sb.from("project_updates").select("id,project_id,body,created_at,author_id").in("project_id", (projects ?? []).map((p: any) => p.id).concat(["00000000-0000-0000-0000-000000000000"])).order("created_at", { ascending: false });
+  const { data: who } = await sb.from("profiles").select("id,full_name,email").neq("role", "client");
+  const authorName = new Map((who ?? []).map((w) => [w.id, w.full_name || w.email]));
   const planOf = new Map((plans ?? []).map((pl: any) => [pl.project_id, pl]));
   const today = isoDay();
   const list = projects ?? [];
@@ -106,6 +110,24 @@ export default async function ProjectsTab({ id, admin, client }: { id: string; a
               )}
 
               {p.description && <p className="mt-4 text-sm text-ink/75">{p.description}</p>}
+
+              <div className="mt-4 rounded-xl border border-edge p-3.5">
+                <p className="tag mb-2">Updates for the client{p.visible_to_client ? "" : " (project is internal, so they won't see these)"}</p>
+                <Form action={postProjectUpdateAction} className="flex flex-wrap gap-2" quiet>
+                  <input type="hidden" name="project_id" value={p.id} /><input type="hidden" name="client_id" value={id} />
+                  <input name="body" required maxLength={2000} placeholder="e.g. Homepage design is ready for your review" className="input min-w-0 flex-1 basis-56" aria-label="Project update" />
+                  <button className="btn-ghost">Post update</button>
+                </Form>
+                <div className="mt-3 space-y-2">
+                  {(updates ?? []).filter((u: any) => u.project_id === p.id).slice(0, 4).map((u: any) => (
+                    <div key={u.id} className="flex items-start justify-between gap-2 text-sm">
+                      <p className="min-w-0"><span className="font-medium">{authorName.get(u.author_id) ?? "Team"}</span> <span className="font-mono text-[10px] text-mute"><LocalTime iso={u.created_at} /></span><br /><span className="whitespace-pre-wrap text-ink/80">{u.body}</span></p>
+                      <Form action={deleteProjectUpdateAction} quiet><input type="hidden" name="id" value={u.id} /><input type="hidden" name="client_id" value={id} /><button aria-label="Remove update" className="px-1.5 text-mute hover:text-red-700">×</button></Form>
+                    </div>
+                  ))}
+                  {(updates ?? []).every((u: any) => u.project_id !== p.id) && <p className="text-xs text-mute">No updates yet. Post one and the client gets a notification.</p>}
+                </div>
+              </div>
 
               <ul className="mt-4 space-y-1">
                 {ms.map((m: any) => (

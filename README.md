@@ -48,7 +48,7 @@ Clients and staff are in different countries, so money is handled per person and
 Everyone can see their own pay on **My pay**. Nobody except the admin can see anyone else's.
 
 ## Setup
-1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0012. Run 0003 on its own (it adds new role names).
+1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0013. Run 0003 on its own (it adds new role names).
 2. Supabase → Authentication → Sign In / Providers: enable Email, and turn **off** "Allow new users to sign up".
 3. Copy `.env.example` to `.env.local` and fill it in (see below).
 4. Create your own login in Supabase (Authentication → Users → Add user, tick auto-confirm), then run once in the SQL editor:
@@ -85,7 +85,7 @@ Push to GitHub and import into Vercel. Add the variables above under Settings �
 - Approving a post cannot be done by anyone below manager, even by calling the API directly.
 - Files are in a private bucket. The server checks the database permission first, then hands out a 60-second link.
 - Anweo AI reads data with the signed-in person's own access, so it can never see more than they can. It is rate limited to 30 questions an hour per person and cannot change anything.
-- 198 database checks, 11 currency, 29 payment-maths and 10 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
+- 222 database checks, 11 currency, 29 payment-maths and 10 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
 
 ## Branding
 Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141413`, paper `#F4F3EF`).
@@ -127,3 +127,15 @@ Invoices have a branded header, company seal, signature block and your terms and
 ## Paying from the app
 
 Clients get a **Pay now** button on every unpaid invoice (their home page and the invoice page). Rupee invoices open a UPI payment link (Google Pay, PhonePe, Paytm…) with your UPI ID and the exact amount filled in, plus a QR code with the same details for scanning from another device. Every other currency opens WhatsApp with the message typed ("I need to finish the due… how should I pay my GBP to you?"). Set the UPI ID and WhatsApp number under Settings. Rupee invoices also print the QR code on the PDF. A client can tap **I've paid** (with an optional reference) which notifies the admin; the admin confirms and marks the invoice paid, because transfers can't be verified automatically.
+
+## Support tickets
+
+Clients raise tickets (something broken, a change request, a new service request, a billing question) from **Support**; the team triages them in **Tickets** (status, priority, who is handling it), replies, and can leave internal notes the client never sees. Both sides are notified of replies; a client can close or reopen their own ticket. Only the admin can delete a ticket.
+
+## Project updates
+
+Under each project the team posts short progress updates (for example "Homepage is ready for review"). The client sees them under the project on their dashboard and gets a notification.
+
+## Search
+
+The search icon in the header searches everything the signed-in person is allowed to see: staff find clients, projects, tickets, tasks and content; clients find their own projects, tickets, invoices and documents.
