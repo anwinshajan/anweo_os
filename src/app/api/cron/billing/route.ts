@@ -48,5 +48,14 @@ export async function GET(req: Request) {
   } catch (e) { console.error("reminders failed", e); }
   let tasks = 0;
   try { tasks = await runTaskTemplates(isoDay()); } catch (e) { console.error("recurring tasks failed", e); }
-  return NextResponse.json({ ok: true, invoicesCreated: data, reminders, tasksCreated: tasks });
+  // Sales: each owner gets one morning nudge listing how many prospects need a follow-up today.
+  let followups = 0;
+  try {
+    const admin = supabaseAdmin();
+    const { data: dueP } = await admin.from("prospects").select("assigned_to,created_by").lte("next_follow_up", isoDay()).not("status", "in", "(won,lost)");
+    const per = new Map<string, number>();
+    for (const p of (dueP ?? []) as any[]) { const o = p.assigned_to ?? p.created_by; if (o) per.set(o, (per.get(o) ?? 0) + 1); }
+    for (const [uid, n] of per) { await notifyUsers([uid], { title: `${n} prospect${n === 1 ? "" : "s"} to follow up today`, body: "Open Growth to see who to message", url: "/growth" }); followups++; }
+  } catch (e) { console.error("follow-up reminders failed", e); }
+  return NextResponse.json({ ok: true, followups, invoicesCreated: data, reminders, tasksCreated: tasks });
 }

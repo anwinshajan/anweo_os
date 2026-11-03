@@ -22,6 +22,7 @@ const sql14 = mig("0014_history_admin_edit.sql");
 const sql15 = mig("0015_marketing_suite.sql");
 const sql16 = mig("0016_client_files.sql");
 const sql17 = mig("0017_direct_messages_mentions.sql");
+const sql18 = mig("0018_sales_pipeline.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -49,6 +50,7 @@ await db.exec(sql14);
 await db.exec(sql15);
 await db.exec(sql16);
 await db.exec(sql17);
+await db.exec(sql18);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -858,6 +860,31 @@ await as(cA, async () => {
 });
 await q(`insert into notifications(user_id, title, priority) values ('${mgr}', 'Mentioned', true), ('${mgr}', 'Plain', false)`);
 await as(mgr, async () => { const n = (await q(`select title, priority from notifications where title in ('Mentioned','Plain') order by title`)).rows; ok("notifications can be marked priority", n.length === 2 && n[0].priority === true && n[1].priority === false); });
+
+// =================== PHASE 9: Anweo sales pipeline ===================
+let pid;
+await as(mk, async () => {
+  pid = (await q(`insert into prospects(business_name, created_by, source) values ('Test Cafe', '${mk}', 'google') returning id`)).rows[0].id;
+  ok("marketing can add a prospect", !!pid);
+  await q(`update prospects set status = 'contacted' where id = '${pid}'`);
+  await q(`insert into prospect_activities(prospect_id, kind, body, created_by) values ('${pid}', 'call', 'Spoke to owner', '${mk}')`);
+  ok("marketing can log activity", (await q(`select id from prospect_activities`)).rows.length === 1);
+  let b = false; try { await q(`insert into prospects(business_name, created_by, place_id) values ('Dup', '${mk}', 'p1'), ('Dup2', '${mk}', 'p1')`); } catch { b = true; }
+  ok("the same Google place cannot be added twice", b);
+  b = false; try { await q(`insert into prospects(business_name, created_by) values ('Forged', '${admin}')`); } catch { b = true; }
+  ok("prospects cannot be created in someone else's name", b);
+  await q(`delete from prospects where id = '${pid}'`);
+  ok("marketing cannot delete prospects", (await q(`select id from prospects where id = '${pid}'`)).rows.length === 1);
+});
+await as(sm, async () => { ok("social managers can see prospects", (await q(`select id from prospects`)).rows.length === 1); });
+for (const [name, uid] of [["developer", dev], ["designer", ds], ["client", cA]]) {
+  await as(uid, async () => {
+    ok(`${name} cannot see prospects`, (await q(`select id from prospects`)).rows.length === 0 && (await q(`select id from prospect_activities`)).rows.length === 0);
+    let b = false; try { await q(`insert into prospects(business_name, created_by) values ('Nope', '${uid}')`); } catch { b = true; }
+    ok(`${name} cannot add prospects`, b);
+  });
+}
+await as(mgr, async () => { await q(`delete from prospects where id = '${pid}'`); ok("a manager can delete a prospect (and its history)", (await q(`select id from prospects where id = '${pid}'`)).rows.length === 0 && (await q(`select id from prospect_activities`)).rows.length === 0); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

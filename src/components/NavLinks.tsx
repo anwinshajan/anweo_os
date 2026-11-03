@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export type IconName = "clients" | "approvals" | "catalogue" | "team" | "chat" | "tasks" | "more" | "home" | "ai" | "account" | "finance" | "pay" | "settings" | "transactions" | "clock" | "studio" | "tickets" | "calendar";
+export type IconName = "clients" | "approvals" | "catalogue" | "team" | "chat" | "tasks" | "more" | "home" | "ai" | "account" | "finance" | "pay" | "settings" | "transactions" | "clock" | "studio" | "tickets" | "calendar" | "growth";
 export type NavItem = { href: string; label: string; icon: IconName; more?: boolean };
 
 const icons: Record<IconName, React.ReactNode> = {
@@ -23,6 +23,7 @@ const icons: Record<IconName, React.ReactNode> = {
   studio: <path d="M4 5h16v11H4V5Zm4 14h8M12 16v3M9 9.5l2 2 3.5-3.5" />,
   tickets: <path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V8Zm9-2v12" />,
   calendar: <path d="M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm-1 4h16M8 4v4m8-4v4" />,
+  growth: <path d="M4 17 9.5 11.5l3.5 3.5L20 8M15 8h5v5" />,
   pay: <path d="M3 8h18v10H3V8Zm0 3h18M7 15h3M6 5h12" />,
 };
 

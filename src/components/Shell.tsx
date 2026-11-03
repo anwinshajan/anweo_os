@@ -25,6 +25,7 @@ export function navFor(me: Me): NavItem[] {
   return [
     { href: "/", label: "Clients", icon: "clients" },
     { href: "/tasks", label: "Tasks", icon: "tasks" },
+    ...(["admin", "manager", "marketing", "social_manager"].includes(me.role) ? [{ href: "/growth", label: "Growth", icon: "growth" } as NavItem] : []),
     { href: "/chat", label: "Chat", icon: "chat" },
     { href: "/studio", label: "Studio", icon: "studio" },
     { href: "/calendar", label: "Calendar", icon: "calendar", more: true },

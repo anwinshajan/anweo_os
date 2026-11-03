@@ -1,0 +1,13 @@
+import { opportunityScore, waLink, csvToProspects, fillTemplate, TEMPLATES } from "../../src/lib/sales.ts";
+let f=0; const ok=(n,c)=>{console.log((c?"PASS ":"FAIL ")+n); if(!c)f++;};
+ok("no-website small business scores hot", opportunityScore({website:null,phone:"1",rating:3.9,review_count:10})>=70);
+ok("strong business scores low", opportunityScore({website:"x",instagram:"y",rating:4.8,review_count:400})<=30);
+ok("UK mobile -> wa.me", waLink("07700 900123","hi")?.startsWith("https://wa.me/447700900123?text=hi"));
+ok("+91 number kept", waLink("+91 91888 40291","x")?.includes("wa.me/919188840291"));
+ok("India 10 digits", waLink("9188840291","x","India")?.includes("wa.me/919188840291"));
+ok("junk phone rejected", waLink("12","x")===null && waLink(null,"x")===null);
+const c=csvToProspects('Business Name,Phone,Notes\n"Joe\'s Cafe, Derby",07700 900123,"says ""call back"""\n,123,x\nBarber,0113 4960000,');
+ok("csv parses quotes and skips blanks", c.length===2 && c[0].business_name==="Joe's Cafe, Derby" && c[0].notes==='says "call back"');
+ok("csv without name column gives nothing", csvToProspects("a,b\n1,2").length===0);
+ok("template fills", fillTemplate(TEMPLATES[0].body,{contact:"Sam Lee",business:"Cafe",me:"Anwin"}).includes("Hi Sam,"));
+console.log(f?`${f} failed`:"all passed"); process.exit(f?1:0);

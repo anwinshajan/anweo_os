@@ -1,4 +1,5 @@
 "use server";
+import { STAGES, isStage, opportunityScore, searchPlaces, csvToProspects, type Found } from "@/lib/sales";
 import { mentionPeople } from "@/lib/chat";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
@@ -1760,4 +1761,175 @@ export const togglePublicLinkAction = safe(async (form: FormData) => {
   const { error } = await sb.from("client_files").update({ public_token: item.public_token ? null : newToken() }).eq("id", id);
   if (error) throw fileErr(error);
   refreshFiles(item.client_id);
+});
+
+
+/* ------------------------------------------------------------------ Anweo sales (prospects) */
+async function requireSales() {
+  const me = await requireActive();
+  if (!["admin", "manager", "marketing", "social_manager"].includes(me.role)) throw new Error("Sales is for the marketing team");
+  return me;
+}
+const clean = (v: string | null | undefined, n = 300) => (v ? v.trim().slice(0, n) || null : null);
+const url = (v: string | null) => (v ? (/^https?:\/\//i.test(v) ? v : `https://${v}`) : null);
+
+export const addProspectAction = safe(async (form: FormData) => {
+  const me = await requireSales();
+  const business_name = str(form, "business_name");
+  if (!business_name) throw new Error("Please enter the business name");
+  const f = {
+    website: clean(url(clean(str(form, "website")))), instagram: clean(str(form, "instagram")), phone: clean(str(form, "phone"), 40),
+  };
+  const sb = await supabaseServer();
+  const { data, error } = await sb.from("prospects").insert({
+    business_name: business_name.slice(0, 160), contact_name: clean(str(form, "contact_name"), 120), email: clean(str(form, "email"), 160), ...f,
+    city: clean(str(form, "city"), 80), category: clean(str(form, "category"), 80), source: str(form, "source") || "manual",
+    service_interest: clean(str(form, "service_interest"), 80), notes: clean(str(form, "notes"), 2000),
+    score: opportunityScore(f), assigned_to: me.id, created_by: me.id,
+  }).select("id").single();
+  if (error) throw new Error(error.message);
+  revalidatePath("/growth");
+  redirect(`/growth/${data.id}`);
+});
+
+export const updateProspectAction = safe(async (form: FormData) => {
+  await requireSales();
+  const id = str(form, "id");
+  const business_name = str(form, "business_name");
+  if (!id || !business_name) throw new Error("Business name is required");
+  const f = { website: clean(url(clean(str(form, "website")))), instagram: clean(str(form, "instagram")), phone: clean(str(form, "phone"), 40) };
+  const est = str(form, "est_value");
+  const sb = await supabaseServer();
+  const { error } = await sb.from("prospects").update({
+    business_name: business_name.slice(0, 160), contact_name: clean(str(form, "contact_name"), 120), email: clean(str(form, "email"), 160), ...f,
+    address: clean(str(form, "address")), city: clean(str(form, "city"), 80), category: clean(str(form, "category"), 80),
+    service_interest: clean(str(form, "service_interest"), 80), notes: clean(str(form, "notes"), 2000),
+    est_value: est && Number(est) >= 0 ? Number(est) : null, currency: cur(form, "currency", "GBP"),
+    next_follow_up: str(form, "next_follow_up") || null, assigned_to: str(form, "assigned_to") || null,
+  }).eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/growth/${id}`); revalidatePath("/growth");
+});
+
+export const setProspectStatusAction = safe(async (form: FormData) => {
+  const me = await requireSales();
+  const id = str(form, "id"), status = str(form, "status");
+  if (!id || !isStage(status)) throw new Error("Unknown stage");
+  if (status === "won") throw new Error("Use “Convert to client” to win a prospect");
+  const sb = await supabaseServer();
+  const lost_reason = status === "lost" ? clean(str(form, "lost_reason"), 200) : null;
+  const { error } = await sb.from("prospects").update({ status, lost_reason, ...(status === "lost" ? { next_follow_up: null } : {}) }).eq("id", id);
+  if (error) throw new Error(error.message);
+  await sb.from("prospect_activities").insert({ prospect_id: id, kind: "status", body: `Moved to ${STAGES.find((x) => x.id === status)?.label}${lost_reason ? ` — ${lost_reason}` : ""}`, created_by: me.id });
+  revalidatePath(`/growth/${id}`); revalidatePath("/growth");
+});
+
+// Log a call, message or note. Sending a first message moves a new prospect to "contacted" by itself.
+export const logProspectActivityAction = safe(async (form: FormData) => {
+  const me = await requireSales();
+  const id = str(form, "id");
+  const kind = str(form, "kind") || "note";
+  const body = clean(str(form, "body"), 2000);
+  if (!id) throw new Error("Missing prospect");
+  if (!["note", "call", "whatsapp", "email", "dm", "meeting"].includes(kind)) throw new Error("Unknown activity");
+  const sb = await supabaseServer();
+  const { error } = await sb.from("prospect_activities").insert({ prospect_id: id, kind, body, created_by: me.id });
+  if (error) throw new Error(error.message);
+  const patch: Record<string, unknown> = {};
+  const next = str(form, "next_follow_up");
+  if (next) patch.next_follow_up = next;
+  if (kind !== "note") {
+    const { data: p } = await sb.from("prospects").select("status").eq("id", id).single();
+    if (p?.status === "new") patch.status = "contacted";
+    if (!next && ["contacted", "new"].includes(p?.status ?? "")) patch.next_follow_up = addDays(isoDay(), 3); // default: follow up in 3 days
+  }
+  if (Object.keys(patch).length) await sb.from("prospects").update(patch).eq("id", id);
+  revalidatePath(`/growth/${id}`); revalidatePath("/growth");
+});
+
+export const deleteProspectAction = safe(async (form: FormData) => {
+  await requireLead();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("prospects").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/growth");
+  redirect("/growth");
+});
+
+// A won prospect becomes a client in one step (managers and admin only, like creating any client).
+export const convertProspectAction = safe(async (form: FormData) => {
+  const me = await requireLead();
+  const id = str(form, "id");
+  const sb = await supabaseServer();
+  const { data: p } = await sb.from("prospects").select("*").eq("id", id).single();
+  if (!p) throw new Error("Prospect not found");
+  if (p.client_id) redirect(`/clients/${p.client_id}`);
+  const country = str(form, "country") || p.country || "United Kingdom";
+  const { data: c, error } = await sb.from("clients").insert({
+    business_name: p.business_name, contact_name: p.contact_name, email: p.email, phone: p.phone, country,
+    currency: cur(form, "currency", currencyForCountry(country)),
+    notes: [p.notes, p.service_interest ? `Interested in: ${p.service_interest}` : null, p.website ? `Website: ${p.website}` : null].filter(Boolean).join("\n") || null,
+    created_by: me.id,
+  }).select("id").single();
+  if (error) throw new Error(error.message);
+  await sb.from("prospects").update({ status: "won", client_id: c.id, next_follow_up: null }).eq("id", id);
+  await sb.from("prospect_activities").insert({ prospect_id: id, kind: "status", body: "Won — converted to a client", created_by: me.id });
+  await logEvent(sb, me.id, c.id, "client_created", "Welcome to Anweo", true);
+  revalidatePath("/growth"); revalidatePath("/");
+  redirect(`/clients/${c.id}`);
+});
+
+// Search Google for local businesses (names, phone, website, reviews). Public business listings only.
+export async function findLeadsAction(query: string): Promise<{ error?: string; results?: (Found & { exists: boolean })[]; needsKey?: boolean }> {
+  try {
+    await requireSales();
+    const q = query.trim().slice(0, 120);
+    if (q.length < 3) return { error: "Type what and where, for example “barbers in Derby”" };
+    const key = process.env.GOOGLE_PLACES_API_KEY?.trim();
+    if (!key) return { needsKey: true, error: "Lead search isn't switched on yet" };
+    const found = await searchPlaces(q, key);
+    const sb = await supabaseServer();
+    const { data: have } = await sb.from("prospects").select("place_id").in("place_id", found.map((f) => f.place_id));
+    const seen = new Set((have ?? []).map((h: any) => h.place_id));
+    return { results: found.map((f) => ({ ...f, exists: seen.has(f.place_id) })) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Search failed" };
+  }
+}
+
+export async function saveFoundLeadsAction(items: Found[]): Promise<{ error?: string; added?: number }> {
+  try {
+    const me = await requireSales();
+    const rows = (items ?? []).slice(0, 50).filter((i) => i?.place_id && i?.business_name).map((i) => ({
+      business_name: String(i.business_name).slice(0, 160), phone: clean(i.phone, 40), website: clean(i.website, 300), address: clean(i.address), city: clean(i.city, 80),
+      category: clean(i.category, 80), source: "google", place_id: String(i.place_id).slice(0, 200), maps_url: clean(i.maps_url, 400),
+      rating: typeof i.rating === "number" ? i.rating : null, review_count: typeof i.review_count === "number" ? Math.round(i.review_count) : null,
+      score: opportunityScore({ website: i.website, phone: i.phone, rating: i.rating, review_count: i.review_count }), assigned_to: me.id, created_by: me.id,
+    }));
+    if (!rows.length) return { added: 0 };
+    const sb = await supabaseServer();
+    const { data, error } = await sb.from("prospects").upsert(rows, { onConflict: "place_id", ignoreDuplicates: true }).select("id");
+    if (error) return { error: error.message };
+    revalidatePath("/growth");
+    return { added: data?.length ?? 0 };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not save" };
+  }
+}
+
+export const importProspectsCsvAction = safe(async (form: FormData) => {
+  const me = await requireSales();
+  const list = csvToProspects(str(form, "csv").slice(0, 400000)).slice(0, 500);
+  if (!list.length) throw new Error("No rows found. The first row must be a header with a “Business name” column.");
+  const sb = await supabaseServer();
+  const rows = list.map((p) => {
+    const f = { website: clean(url(clean(p.website ?? null)), 300), instagram: clean(p.instagram ?? null), phone: clean(p.phone ?? null, 40) };
+    return { business_name: p.business_name.slice(0, 160), contact_name: clean(p.contact_name ?? null, 120), email: clean(p.email ?? null, 160), ...f,
+      address: clean(p.address ?? null), city: clean(p.city ?? null, 80), category: clean(p.category ?? null, 80), notes: clean(p.notes ?? null, 2000),
+      source: "csv", score: opportunityScore(f), assigned_to: me.id, created_by: me.id };
+  });
+  const { error } = await sb.from("prospects").insert(rows);
+  if (error) throw new Error(error.message);
+  revalidatePath("/growth");
+  redirect("/growth");
 });
