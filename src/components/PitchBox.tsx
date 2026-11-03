@@ -6,12 +6,12 @@ import { TEMPLATES, fillTemplate, waLink } from "@/lib/sales";
 import { toast } from "@/components/Toaster";
 
 // Pick a message, tweak it, then send it over WhatsApp or email. Sending is logged on the timeline automatically.
-export default function PitchBox({ id, phone, email, contact, business, me, country }: { id: string; phone: string | null; email: string | null; contact: string | null; business: string; me: string; country: string }) {
+export default function PitchBox({ suggested, id, phone, email, contact, business, me, country }: { suggested?: string; id: string; phone: string | null; email: string | null; contact: string | null; business: string; me: string; country: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [tpl, setTpl] = useState(TEMPLATES[0].id);
+  const [tpl, setTpl] = useState(TEMPLATES.some((t) => t.id === suggested) ? suggested! : TEMPLATES[0].id);
   const fill = (t: string) => fillTemplate(TEMPLATES.find((x) => x.id === t)!.body, { contact, business, me });
-  const [text, setText] = useState(() => fill(TEMPLATES[0].id));
+  const [text, setText] = useState(() => fill(TEMPLATES.some((t) => t.id === suggested) ? suggested! : TEMPLATES[0].id));
   const wa = waLink(phone, text, country);
 
   function log(kind: string) {

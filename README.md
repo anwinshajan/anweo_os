@@ -169,8 +169,8 @@ Linked files open **inside the app** (`/view/<id>`) when the site allows it: Goo
 - Type `@` in any chat to mention someone. They get a **priority** notification (red badge in the inbox, high-urgency push that stays on screen until dismissed).
 
 ## Growth: Anweo's own sales system (team only)
-`/growth` is visible to admin, managers, marketing and social media managers. Find prospects, pitch them, follow up, convert to clients.
-- **Find leads** (`/growth/find`): searches Google business listings. Needs `GOOGLE_PLACES_API_KEY` (Google Cloud, "Places API (New)"). You can also import a CSV or add prospects by hand.
-- Each prospect gets an opportunity score (no website, thin reviews, low rating = hotter), message templates with one-tap WhatsApp/email/DM, a timeline, and a follow-up date. A morning notification lists who to chase.
-- Managers/admin convert a prospect to a client in one click.
-- Only collect public business details and follow UK PECR/GDPR when contacting sole traders and individuals.
+`/growth` is visible to admin, managers, marketing and social media managers. Leads are added by hand or imported from a sheet in a fixed format (`/growth/import`, template download included; duplicates are skipped).
+- Each prospect shows a **next step** for its stage, a playbook checklist, ready messages (WhatsApp / email / DM copy), objection replies, a timeline and a follow-up date that is set automatically as the stage changes.
+- Deals with no contact for a week are flagged "going cold"; each owner gets a morning notification with the follow-ups due; the dashboard shows a stage-weighted forecast.
+- Managers/admin convert a won prospect to a client in one click.
+- Only use public business details and follow UK PECR/GDPR when contacting sole traders and individuals.

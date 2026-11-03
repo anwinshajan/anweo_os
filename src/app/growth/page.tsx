@@ -4,7 +4,7 @@ import Form from "@/components/Form";
 import Shell, { Empty, PageHead, fmtDate } from "@/components/Shell";
 import { addProspectAction } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
-import { SERVICES, SOURCES, STAGES, scoreLabel } from "@/lib/sales";
+import { SERVICES, SOURCES, STAGES, WIN_CHANCE, isCold, nextAction, scoreLabel } from "@/lib/sales";
 import { isoDay } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export default async function Growth({ searchParams }: { searchParams: Promise<{
   const sb = await supabaseServer();
   const { data } = await sb
     .from("prospects")
-    .select("id,business_name,contact_name,city,category,status,score,next_follow_up,assigned_to,est_value,currency,phone,profiles:assigned_to(full_name)")
+    .select("id,business_name,contact_name,city,category,status,score,next_follow_up,last_touch_at,website,assigned_to,est_value,currency,phone,profiles:assigned_to(full_name)")
     .order("score", { ascending: false })
     .limit(600);
   let all = (data ?? []) as any[];
@@ -31,7 +31,8 @@ export default async function Growth({ searchParams }: { searchParams: Promise<{
   const won = all.filter((p) => p.status === "won").length, lost = all.filter((p) => p.status === "lost").length;
   const rate = won + lost ? Math.round((won / (won + lost)) * 100) : null;
   const pipeline: Record<string, number> = {};
-  live.filter((p) => p.est_value).forEach((p) => { pipeline[p.currency] = (pipeline[p.currency] ?? 0) + Number(p.est_value); });
+  live.filter((p) => p.est_value).forEach((p) => { pipeline[p.currency] = (pipeline[p.currency] ?? 0) + Number(p.est_value) * (WIN_CHANCE[p.status] ?? 0); });
+  const cold = live.filter((p) => isCold(p)).sort((a, b) => a.last_touch_at.localeCompare(b.last_touch_at));
 
   const stat = (label: string, value: string, sub?: string) => (
     <div className="card !p-4"><p className="tag">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p>{sub && <p className="text-xs text-mute">{sub}</p>}</div>
@@ -39,9 +40,10 @@ export default async function Growth({ searchParams }: { searchParams: Promise<{
 
   return (
     <Shell me={me}>
-      <PageHead tag="Anweo growth" title="Find clients" sub="Find local businesses, reach out, follow up and turn them into clients. Only the sales team sees this.">
+      <PageHead tag="Anweo growth" title="Find clients" sub="Add leads, reach out, follow up and close them as clients. The system tells you what to do next. Only the sales team sees this.">
         <div className="flex gap-2">
-          <Link href="/growth/find" className="btn-primary">Find leads</Link>
+          <Link href="/growth/import" className="btn-ghost">Import leads</Link>
+          <a href="#add" className="btn-primary">Add a lead</a>
         </div>
       </PageHead>
 
@@ -49,7 +51,7 @@ export default async function Growth({ searchParams }: { searchParams: Promise<{
         {stat("In pipeline", String(live.length), `${all.filter((p) => p.status === "new").length} not contacted`)}
         {stat("Follow-ups due", String(due.length), due.length ? "Do these first" : "All clear")}
         {stat("Won", String(won), rate !== null ? `${rate}% of closed` : "No closed deals yet")}
-        {stat("Est. value", Object.keys(pipeline).length ? Object.entries(pipeline).map(([c, v]) => `${c} ${Math.round(v).toLocaleString("en-GB")}`).join(" · ") : "—", "Open deals with a value")}
+        {stat("Likely to close", Object.keys(pipeline).length ? Object.entries(pipeline).map(([c, v]) => `${c} ${Math.round(v).toLocaleString("en-GB")}`).join(" · ") : "—", "Deal values weighted by stage")}
       </div>
 
       {due.length > 0 && (
@@ -58,10 +60,19 @@ export default async function Growth({ searchParams }: { searchParams: Promise<{
           <div className="space-y-2">
             {due.slice(0, 8).map((p) => (
               <Link key={p.id} href={`/growth/${p.id}`} className="row hover:border-forest/40">
-                <span className="min-w-0"><span className="block truncate font-semibold">{p.business_name}</span><span className="font-mono text-[11px] text-mute">{STAGES.find((s) => s.id === p.status)?.label} · due {fmtDate(p.next_follow_up)}</span></span>
+                <span className="min-w-0"><span className="block truncate font-semibold">{p.business_name}</span><span className="block text-xs text-forest">{nextAction(p, today).title}</span><span className="font-mono text-[11px] text-mute">{STAGES.find((s) => s.id === p.status)?.label} · due {fmtDate(p.next_follow_up)}</span></span>
                 <span className="btn-ghost !px-3 !py-1.5 text-xs">Open</span>
               </Link>
             ))}
+          </div>
+        </section>
+      )}
+
+      {cold.length > 0 && (
+        <section className="mb-6">
+          <p className="tag mb-2">[ Going cold. No contact for a week ]</p>
+          <div className="flex flex-wrap gap-2">
+            {cold.slice(0, 10).map((p) => <Link key={p.id} href={`/growth/${p.id}`} className="pill bg-amber-50 text-amber-700 hover:bg-amber-100">{p.business_name}</Link>)}
           </div>
         </section>
       )}
@@ -83,6 +94,7 @@ export default async function Growth({ searchParams }: { searchParams: Promise<{
                   <Link key={p.id} href={`/growth/${p.id}`} className="block rounded-xl border border-edge bg-white p-3 transition hover:-translate-y-0.5 hover:border-forest/40">
                     <p className="truncate font-semibold">{p.business_name}</p>
                     <p className="truncate text-xs text-mute">{[p.category, p.city].filter(Boolean).join(" · ") || "—"}</p>
+                    {isCold(p) && <p className="mt-1 text-[11px] font-medium text-amber-700">Going cold</p>}
                     <div className="mt-2 flex items-center justify-between gap-2">
                       {st.id !== "won" && st.id !== "lost" ? <span className={`pill ${p.score >= 70 ? "bg-red-50 text-red-700" : p.score >= 45 ? "bg-amber-50 text-amber-700" : "bg-forest-soft text-forest"}`}>{scoreLabel(p.score)}</span> : <span />}
                       <span className="font-mono text-[10px] text-mute">{p.next_follow_up && !["won", "lost"].includes(p.status) ? `follow up ${fmtDate(p.next_follow_up)}` : p.profiles?.full_name?.split(" ")[0] ?? ""}</span>
@@ -94,9 +106,9 @@ export default async function Growth({ searchParams }: { searchParams: Promise<{
           );
         })}
       </div>
-      {all.length === 0 && <Empty>No prospects yet. Use “Find leads” to search Google for local businesses, import a list, or add one below.</Empty>}
+      {all.length === 0 && <Empty>No prospects yet. Add one below or import a sheet.</Empty>}
 
-      <details className="card mt-6">
+      <details id="add" className="card mt-6">
         <summary className="cursor-pointer font-semibold">Add a prospect by hand</summary>
         <Form action={addProspectAction} className="mt-4 grid gap-3 sm:grid-cols-2">
           <input name="business_name" required placeholder="Business name" className="input sm:col-span-2" />

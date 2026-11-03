@@ -6,7 +6,8 @@ import PitchBox from "@/components/PitchBox";
 import Shell, { PageHead, fmtDate } from "@/components/Shell";
 import { convertProspectAction, deleteProspectAction, logProspectActivityAction, setProspectStatusAction, updateProspectAction } from "@/app/actions";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
-import { SERVICES, STAGES, scoreLabel, whyThem } from "@/lib/sales";
+import { OBJECTIONS, PLAYBOOK, SERVICES, STAGES, nextAction, scoreLabel, whyThem } from "@/lib/sales";
+import { isoDay } from "@/lib/payments";
 import { isLeadRole } from "@/lib/roles";
 import { CURRENCIES } from "@/lib/currency";
 
@@ -40,6 +41,21 @@ export default async function Prospect({ params }: { params: Promise<{ id: strin
 
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         <div className="space-y-5">
+          {/* what to do next */}
+          {(() => {
+            const n = nextAction(p, isoDay());
+            return (
+              <div className={`rounded-xl2 p-5 ${n.tone === "urgent" ? "bg-red-50 ring-1 ring-red-200" : n.tone === "normal" ? "bg-lime/30 ring-1 ring-lime" : "bg-forest-soft ring-1 ring-edge"}`}>
+                <p className="tag">[ Next step ]</p>
+                <p className="mt-1 text-xl font-bold">{n.title}</p>
+                <p className="mt-1 text-sm text-ink/70">{n.why}</p>
+                {PLAYBOOK[p.status] && (
+                  <ul className="mt-3 space-y-1 text-sm text-ink/80">{PLAYBOOK[p.status].map((t) => <li key={t} className="flex gap-2"><span className="text-forest">✓</span>{t}</li>)}</ul>
+                )}
+              </div>
+            );
+          })()}
+
           {/* stage */}
           <div className="card">
             <p className="tag mb-3">[ Stage ]</p>
@@ -67,7 +83,18 @@ export default async function Prospect({ params }: { params: Promise<{ id: strin
           </div>
 
           {/* reach out */}
-          {!closed && <PitchBox id={p.id} phone={p.phone} email={p.email} contact={p.contact_name} business={p.business_name} me={me.full_name || "the Anweo team"} country={p.country || "United Kingdom"} />}
+          {!closed && <PitchBox suggested={nextAction(p, isoDay()).template} id={p.id} phone={p.phone} email={p.email} contact={p.contact_name} business={p.business_name} me={me.full_name || "the Anweo team"} country={p.country || "United Kingdom"} />}
+
+          {!closed && (
+            <details className="card">
+              <summary className="cursor-pointer font-semibold">They pushed back? Reply ideas</summary>
+              <div className="mt-3 space-y-3">
+                {OBJECTIONS.map((o) => (
+                  <div key={o.q} className="rounded-xl border border-edge bg-paper/60 p-3 text-sm"><p className="font-semibold">{o.q}</p><p className="mt-1 text-ink/80">{o.reply}</p></div>
+                ))}
+              </div>
+            </details>
+          )}
 
           {/* log */}
           <div className="card">

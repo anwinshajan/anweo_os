@@ -13,7 +13,7 @@ export type StageId = (typeof STAGES)[number]["id"];
 export const stageLabel = (s: string) => STAGES.find((x) => x.id === s)?.label ?? s;
 export const isStage = (s: string): s is StageId => STAGES.some((x) => x.id === s);
 
-export const SOURCES = ["manual", "google", "csv", "referral", "instagram", "walk-in", "other"];
+export const SOURCES = ["manual", "csv", "referral", "instagram", "walk-in", "other"];
 export const SERVICES = ["Social media management", "Website", "Branding & logo", "Video / reels", "Paid ads", "SEO", "E-commerce", "Other"];
 
 // How good a target is for a marketing agency (0 to 100): no website, thin online presence and
@@ -56,53 +56,12 @@ export const TEMPLATES: Template[] = [
   { id: "nosite", name: "No website", body: "Hi {contact}, I noticed {business} doesn't have a website yet, so people searching for you can't find you easily. I'm {me} from Anweo. We build simple, quick sites for local businesses. Can I show you an example?" },
   { id: "social", name: "Social media", body: "Hi {contact}, I'm {me} from Anweo. We look after Instagram and Facebook for businesses like {business}: posts, reels and ads, all handled for you. Would you like a free idea for your next month of content?" },
   { id: "followup", name: "Follow-up", body: "Hi {contact}, just following up on my last message about {business}. Happy to keep it short. Is now a good time for a 10 minute call?" },
+  { id: "meeting", name: "Book a call", body: "Hi {contact}, thanks for coming back to me. Could we have a quick 15 minute call about {business}? I'm free tomorrow morning or afternoon, whichever suits you." },
+  { id: "chase", name: "Chase proposal", body: "Hi {contact}, I wanted to check you received the proposal for {business}. Do you have any questions? I'm happy to adjust anything, or start with a smaller package. {me}, Anweo" },
   { id: "proposal", name: "After meeting", body: "Hi {contact}, great speaking with you. As promised, I'm sending the proposal for {business}. Let me know what you think and I'll adjust anything you like. {me}, Anweo" },
 ];
 export const fillTemplate = (t: string, v: { contact?: string | null; business: string; me: string }) =>
   t.replaceAll("{contact}", v.contact?.split(" ")[0] || "there").replaceAll("{business}", v.business).replaceAll("{me}", v.me);
-
-// ---- Google Places lead search (needs GOOGLE_PLACES_API_KEY; see README)
-export type Found = {
-  place_id: string; business_name: string; address: string | null; city: string | null; phone: string | null;
-  website: string | null; rating: number | null; review_count: number | null; maps_url: string | null; category: string | null; score: number;
-};
-export async function searchPlaces(query: string, key: string): Promise<Found[]> {
-  const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": key,
-      "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.googleMapsUri,places.primaryTypeDisplayName,places.businessStatus",
-    },
-    body: JSON.stringify({ textQuery: query, pageSize: 20 }),
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const j = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(j?.error?.message || `Google search failed (${res.status})`);
-  }
-  const j = (await res.json()) as { places?: any[] };
-  return (j.places ?? [])
-    .filter((p) => p.businessStatus !== "CLOSED_PERMANENTLY")
-    .map((p) => {
-      const address: string | null = p.formattedAddress ?? null;
-      const parts = address?.split(",").map((x: string) => x.trim()) ?? [];
-      const f = {
-        place_id: String(p.id),
-        business_name: String(p.displayName?.text ?? "Unknown"),
-        address,
-        city: parts.length >= 3 ? parts[parts.length - 2].replace(/\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b/, "").trim() || null : null,
-        phone: p.internationalPhoneNumber ?? p.nationalPhoneNumber ?? null,
-        website: p.websiteUri ?? null,
-        rating: typeof p.rating === "number" ? p.rating : null,
-        review_count: typeof p.userRatingCount === "number" ? p.userRatingCount : null,
-        maps_url: p.googleMapsUri ?? null,
-        category: p.primaryTypeDisplayName?.text ?? null,
-      };
-      return { ...f, score: opportunityScore({ ...f, instagram: null }) };
-    })
-    .sort((a, b) => b.score - a.score);
-}
 
 // ---- CSV import: first row is the header. Understands common column names.
 export function parseCsv(text: string): string[][] {
@@ -157,3 +116,68 @@ export function csvToProspects(text: string): CsvProspect[] {
     return o as CsvProspect;
   }).filter((p) => p.business_name);
 }
+
+
+export const norm = {
+  phone: (v?: string | null) => (v ? v.replace(/\D/g, "").slice(-10) : ""),
+  name: (v?: string | null) => (v ?? "").toLowerCase().replace(/[^a-z0-9]/g, ""),
+};
+// Two prospects are the same business if they share a phone number, or the same name in the same city.
+export const dupeKeys = (p: { phone?: string | null; business_name: string; city?: string | null }) => {
+  const k: string[] = [];
+  if (norm.phone(p.phone).length >= 7) k.push("p:" + norm.phone(p.phone));
+  k.push("n:" + norm.name(p.business_name) + "|" + norm.name(p.city));
+  return k;
+};
+
+// ---- the import format
+export const CSV_COLUMNS = ["Business name", "Contact name", "Phone", "Email", "Website", "Instagram", "City", "Category", "Notes"];
+export const CSV_TEMPLATE = CSV_COLUMNS.join(",") + '\n"Joe\'s Barbers","Joe Smith","07700 900123","joe@example.com","","joesbarbers","Derby","Barber","Met at the market"\n';
+
+// ---- closing help
+const DAY = 864e5;
+export const WIN_CHANCE: Record<string, number> = { new: 0.05, contacted: 0.1, replied: 0.25, meeting: 0.45, proposal: 0.65, won: 1, lost: 0 };
+// Days until the next follow-up when a prospect enters a stage.
+export const FOLLOW_UP_DAYS: Record<string, number | null> = { new: 0, contacted: 3, replied: 1, meeting: 2, proposal: 3, won: null, lost: null };
+
+export type Next = { title: string; why: string; template?: string; tone: "urgent" | "normal" | "calm" };
+export function nextAction(p: { status: string; phone?: string | null; website?: string | null; next_follow_up?: string | null; last_touch_at?: string | null; est_value?: number | null }, today: string): Next {
+  const idle = p.last_touch_at ? Math.floor((Date.now() - new Date(p.last_touch_at).getTime()) / DAY) : 0;
+  const overdue = !!p.next_follow_up && p.next_follow_up < today;
+  const due = !!p.next_follow_up && p.next_follow_up <= today;
+  switch (p.status) {
+    case "new":
+      return { title: "Send the first message", why: !p.website ? "They have no website, so lead with that." : "Keep it short and ask for a quick chat.", template: !p.website ? "nosite" : "intro", tone: "normal" };
+    case "contacted":
+      return due ? { title: overdue ? "Follow up now, it is overdue" : "Follow up today", why: `No reply for ${idle} day${idle === 1 ? "" : "s"}. A gentle nudge works best.`, template: "followup", tone: overdue ? "urgent" : "normal" }
+        : { title: "Wait for a reply", why: `Next nudge is planned for ${p.next_follow_up}.`, tone: "calm" };
+    case "replied":
+      return { title: "Book a short call or meeting", why: "They answered, so move fast while they are warm. Offer two time slots.", template: "meeting", tone: due ? "urgent" : "normal" };
+    case "meeting":
+      return { title: "Send the proposal", why: "Send it within 24 hours of the meeting, while the conversation is fresh.", template: "proposal", tone: due ? "urgent" : "normal" };
+    case "proposal":
+      return due ? { title: "Chase the proposal", why: `Sent ${idle} day${idle === 1 ? "" : "s"} ago. Ask what questions they have, and offer to adjust it.`, template: "chase", tone: "urgent" }
+        : { title: "Give them time to read it", why: `Chase on ${p.next_follow_up}. Be ready for price objections.`, tone: "calm" };
+    case "won": return { title: "Onboard the client", why: "Set up their projects, invoice and first tasks.", tone: "calm" };
+    default: return { title: "Closed", why: "Move back to an open stage if they come back.", tone: "calm" };
+  }
+}
+export const isCold = (p: { status: string; last_touch_at?: string | null }, days = 7) =>
+  !["won", "lost", "new"].includes(p.status) && !!p.last_touch_at && Date.now() - new Date(p.last_touch_at).getTime() > days * DAY;
+
+export const PLAYBOOK: Record<string, string[]> = {
+  new: ["Check their website and Instagram for one specific thing you can improve", "Send a short first message, not a long pitch", "Do not send the same text to everyone"],
+  contacted: ["Follow up after 3 days, once", "A second follow-up should add value (an idea, an example)", "No reply after 3 attempts: mark Lost and revisit in 3 months"],
+  replied: ["Answer their question first", "Ask what their main goal is (more calls, more walk-ins, more sales)", "Suggest a 15 minute call and give two times"],
+  meeting: ["Ask about goals and budget, then listen", "Agree the next step before you leave", "Send the proposal within 24 hours"],
+  proposal: ["Keep the proposal to one page with one clear price", "Follow up after 3 days", "Offer a smaller starter package if price is the worry"],
+};
+
+export const OBJECTIONS: { q: string; reply: string }[] = [
+  { q: "“It's too expensive”", reply: "I understand. Which part feels like too much? We can start with a smaller package, for example just the social media or just the website, and add more once you see results." },
+  { q: "“Let me think about it”", reply: "Of course. So I can help you decide, what would you want to be sure about? I'm happy to send a short example of what we did for a similar business." },
+  { q: "“We already have someone”", reply: "That's good to hear. Many of our clients had someone before. If you want a second opinion, I can look at your pages and send three ideas for free, no obligation." },
+  { q: "“Not right now”", reply: "No problem at all. When would be a better time? I'll check back then. In the meantime I'll send you one quick idea you can use for free." },
+  { q: "“Does this really work?”", reply: "Fair question. I can show you results from a similar business, and we keep reporting simple so you always see what you get for your money." },
+  { q: "“I can do it myself”", reply: "You probably could, but it takes hours each week that you'd rather spend running the business. We take that off your plate and keep it consistent." },
+];

@@ -1,5 +1,5 @@
 "use server";
-import { STAGES, isStage, opportunityScore, searchPlaces, csvToProspects, type Found } from "@/lib/sales";
+import { STAGES, FOLLOW_UP_DAYS, dupeKeys, isStage, opportunityScore } from "@/lib/sales";
 import { mentionPeople } from "@/lib/chat";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
@@ -1781,6 +1781,10 @@ export const addProspectAction = safe(async (form: FormData) => {
     website: clean(url(clean(str(form, "website")))), instagram: clean(str(form, "instagram")), phone: clean(str(form, "phone"), 40),
   };
   const sb = await supabaseServer();
+  const { data: have } = await sb.from("prospects").select("id,business_name,phone,city").limit(5000);
+  const mine = new Set(dupeKeys({ phone: f.phone, business_name, city: str(form, "city") }));
+  const same = (have ?? []).find((h: any) => dupeKeys(h).some((k) => mine.has(k)));
+  if (same) throw new Error(`${(same as any).business_name} is already in the pipeline`);
   const { data, error } = await sb.from("prospects").insert({
     business_name: business_name.slice(0, 160), contact_name: clean(str(form, "contact_name"), 120), email: clean(str(form, "email"), 160), ...f,
     city: clean(str(form, "city"), 80), category: clean(str(form, "category"), 80), source: str(form, "source") || "manual",
@@ -1818,7 +1822,8 @@ export const setProspectStatusAction = safe(async (form: FormData) => {
   if (status === "won") throw new Error("Use “Convert to client” to win a prospect");
   const sb = await supabaseServer();
   const lost_reason = status === "lost" ? clean(str(form, "lost_reason"), 200) : null;
-  const { error } = await sb.from("prospects").update({ status, lost_reason, ...(status === "lost" ? { next_follow_up: null } : {}) }).eq("id", id);
+  const days = FOLLOW_UP_DAYS[status];
+  const { error } = await sb.from("prospects").update({ status, lost_reason, last_touch_at: new Date().toISOString(), next_follow_up: days == null ? null : addDays(isoDay(), days) }).eq("id", id);
   if (error) throw new Error(error.message);
   await sb.from("prospect_activities").insert({ prospect_id: id, kind: "status", body: `Moved to ${STAGES.find((x) => x.id === status)?.label}${lost_reason ? ` — ${lost_reason}` : ""}`, created_by: me.id });
   revalidatePath(`/growth/${id}`); revalidatePath("/growth");
@@ -1835,7 +1840,7 @@ export const logProspectActivityAction = safe(async (form: FormData) => {
   const sb = await supabaseServer();
   const { error } = await sb.from("prospect_activities").insert({ prospect_id: id, kind, body, created_by: me.id });
   if (error) throw new Error(error.message);
-  const patch: Record<string, unknown> = {};
+  const patch: Record<string, unknown> = { last_touch_at: new Date().toISOString() };
   const next = str(form, "next_follow_up");
   if (next) patch.next_follow_up = next;
   if (kind !== "note") {
@@ -1843,7 +1848,7 @@ export const logProspectActivityAction = safe(async (form: FormData) => {
     if (p?.status === "new") patch.status = "contacted";
     if (!next && ["contacted", "new"].includes(p?.status ?? "")) patch.next_follow_up = addDays(isoDay(), 3); // default: follow up in 3 days
   }
-  if (Object.keys(patch).length) await sb.from("prospects").update(patch).eq("id", id);
+  await sb.from("prospects").update(patch).eq("id", id);
   revalidatePath(`/growth/${id}`); revalidatePath("/growth");
 });
 
@@ -1879,57 +1884,36 @@ export const convertProspectAction = safe(async (form: FormData) => {
   redirect(`/clients/${c.id}`);
 });
 
-// Search Google for local businesses (names, phone, website, reviews). Public business listings only.
-export async function findLeadsAction(query: string): Promise<{ error?: string; results?: (Found & { exists: boolean })[]; needsKey?: boolean }> {
-  try {
-    await requireSales();
-    const q = query.trim().slice(0, 120);
-    if (q.length < 3) return { error: "Type what and where, for example “barbers in Derby”" };
-    const key = process.env.GOOGLE_PLACES_API_KEY?.trim();
-    if (!key) return { needsKey: true, error: "Lead search isn't switched on yet" };
-    const found = await searchPlaces(q, key);
-    const sb = await supabaseServer();
-    const { data: have } = await sb.from("prospects").select("place_id").in("place_id", found.map((f) => f.place_id));
-    const seen = new Set((have ?? []).map((h: any) => h.place_id));
-    return { results: found.map((f) => ({ ...f, exists: seen.has(f.place_id) })) };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Search failed" };
-  }
-}
-
-export async function saveFoundLeadsAction(items: Found[]): Promise<{ error?: string; added?: number }> {
+// Import prospects from the standard sheet. The browser has already parsed and previewed them; everything is checked again here,
+// and anyone already in the pipeline (same phone, or same name in the same city) is skipped.
+export async function importProspectsAction(items: { business_name: string; contact_name?: string; phone?: string; email?: string; website?: string; instagram?: string; city?: string; category?: string; notes?: string }[]): Promise<{ error?: string; added?: number; skipped?: number }> {
   try {
     const me = await requireSales();
-    const rows = (items ?? []).slice(0, 50).filter((i) => i?.place_id && i?.business_name).map((i) => ({
-      business_name: String(i.business_name).slice(0, 160), phone: clean(i.phone, 40), website: clean(i.website, 300), address: clean(i.address), city: clean(i.city, 80),
-      category: clean(i.category, 80), source: "google", place_id: String(i.place_id).slice(0, 200), maps_url: clean(i.maps_url, 400),
-      rating: typeof i.rating === "number" ? i.rating : null, review_count: typeof i.review_count === "number" ? Math.round(i.review_count) : null,
-      score: opportunityScore({ website: i.website, phone: i.phone, rating: i.rating, review_count: i.review_count }), assigned_to: me.id, created_by: me.id,
-    }));
-    if (!rows.length) return { added: 0 };
+    const list = (Array.isArray(items) ? items : []).slice(0, 500).filter((i) => i && typeof i.business_name === "string" && i.business_name.trim());
+    if (!list.length) return { error: "No valid rows to import" };
     const sb = await supabaseServer();
-    const { data, error } = await sb.from("prospects").upsert(rows, { onConflict: "place_id", ignoreDuplicates: true }).select("id");
-    if (error) return { error: error.message };
+    const { data: have } = await sb.from("prospects").select("business_name,phone,city").limit(5000);
+    const seen = new Set((have ?? []).flatMap((h: any) => dupeKeys(h)));
+    const rows: Record<string, unknown>[] = [];
+    let skipped = 0;
+    for (const p of list) {
+      const keys = dupeKeys({ phone: p.phone, business_name: p.business_name, city: p.city });
+      if (keys.some((k) => seen.has(k))) { skipped++; continue; }
+      keys.forEach((k) => seen.add(k));
+      const f = { website: clean(url(clean(p.website ?? null)), 300), instagram: clean(p.instagram ?? null), phone: clean(p.phone ?? null, 40) };
+      rows.push({
+        business_name: p.business_name.trim().slice(0, 160), contact_name: clean(p.contact_name ?? null, 120), email: clean(p.email ?? null, 160), ...f,
+        city: clean(p.city ?? null, 80), category: clean(p.category ?? null, 80), notes: clean(p.notes ?? null, 2000),
+        source: "csv", score: opportunityScore(f), assigned_to: me.id, created_by: me.id,
+      });
+    }
+    if (rows.length) {
+      const { error } = await sb.from("prospects").insert(rows);
+      if (error) return { error: error.message };
+    }
     revalidatePath("/growth");
-    return { added: data?.length ?? 0 };
+    return { added: rows.length, skipped };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not save" };
+    return { error: e instanceof Error ? e.message : "Import failed" };
   }
 }
-
-export const importProspectsCsvAction = safe(async (form: FormData) => {
-  const me = await requireSales();
-  const list = csvToProspects(str(form, "csv").slice(0, 400000)).slice(0, 500);
-  if (!list.length) throw new Error("No rows found. The first row must be a header with a “Business name” column.");
-  const sb = await supabaseServer();
-  const rows = list.map((p) => {
-    const f = { website: clean(url(clean(p.website ?? null)), 300), instagram: clean(p.instagram ?? null), phone: clean(p.phone ?? null, 40) };
-    return { business_name: p.business_name.slice(0, 160), contact_name: clean(p.contact_name ?? null, 120), email: clean(p.email ?? null, 160), ...f,
-      address: clean(p.address ?? null), city: clean(p.city ?? null, 80), category: clean(p.category ?? null, 80), notes: clean(p.notes ?? null, 2000),
-      source: "csv", score: opportunityScore(f), assigned_to: me.id, created_by: me.id };
-  });
-  const { error } = await sb.from("prospects").insert(rows);
-  if (error) throw new Error(error.message);
-  revalidatePath("/growth");
-  redirect("/growth");
-});

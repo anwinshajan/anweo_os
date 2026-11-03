@@ -23,6 +23,7 @@ const sql15 = mig("0015_marketing_suite.sql");
 const sql16 = mig("0016_client_files.sql");
 const sql17 = mig("0017_direct_messages_mentions.sql");
 const sql18 = mig("0018_sales_pipeline.sql");
+const sql19 = mig("0019_prospect_touch.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -51,6 +52,7 @@ await db.exec(sql15);
 await db.exec(sql16);
 await db.exec(sql17);
 await db.exec(sql18);
+await db.exec(sql19);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -884,6 +886,7 @@ for (const [name, uid] of [["developer", dev], ["designer", ds], ["client", cA]]
     ok(`${name} cannot add prospects`, b);
   });
 }
+await as(mk, async () => { await q(`update prospects set last_touch_at = now() - interval '9 days' where id = '${pid}'`); ok("last touch can be updated", (await q(`select id from prospects where last_touch_at < now() - interval '8 days'`)).rows.length === 1); });
 await as(mgr, async () => { await q(`delete from prospects where id = '${pid}'`); ok("a manager can delete a prospect (and its history)", (await q(`select id from prospects where id = '${pid}'`)).rows.length === 0 && (await q(`select id from prospect_activities`)).rows.length === 0); });
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -1,4 +1,4 @@
-import { opportunityScore, waLink, csvToProspects, fillTemplate, TEMPLATES } from "../../src/lib/sales.ts";
+import { opportunityScore, waLink, csvToProspects, fillTemplate, TEMPLATES, nextAction, isCold, dupeKeys, CSV_TEMPLATE, WIN_CHANCE } from "../../src/lib/sales.ts";
 let f=0; const ok=(n,c)=>{console.log((c?"PASS ":"FAIL ")+n); if(!c)f++;};
 ok("no-website small business scores hot", opportunityScore({website:null,phone:"1",rating:3.9,review_count:10})>=70);
 ok("strong business scores low", opportunityScore({website:"x",instagram:"y",rating:4.8,review_count:400})<=30);
@@ -10,4 +10,13 @@ const c=csvToProspects('Business Name,Phone,Notes\n"Joe\'s Cafe, Derby",07700 90
 ok("csv parses quotes and skips blanks", c.length===2 && c[0].business_name==="Joe's Cafe, Derby" && c[0].notes==='says "call back"');
 ok("csv without name column gives nothing", csvToProspects("a,b\n1,2").length===0);
 ok("template fills", fillTemplate(TEMPLATES[0].body,{contact:"Sam Lee",business:"Cafe",me:"Anwin"}).includes("Hi Sam,"));
+const today="2026-11-03";
+ok("new prospect without site -> pitch the website", nextAction({status:"new",website:null},today).template==="nosite");
+ok("overdue follow-up is urgent", nextAction({status:"contacted",next_follow_up:"2026-11-01",last_touch_at:new Date(Date.now()-4*864e5).toISOString()},today).tone==="urgent");
+ok("waiting before follow-up date is calm", nextAction({status:"contacted",next_follow_up:"2026-11-09"},today).tone==="calm");
+ok("meeting -> send proposal", nextAction({status:"meeting",next_follow_up:"2026-11-05"},today).template==="proposal");
+ok("cold after a week of silence", isCold({status:"proposal",last_touch_at:new Date(Date.now()-9*864e5).toISOString()}) && !isCold({status:"proposal",last_touch_at:new Date().toISOString()}) && !isCold({status:"new",last_touch_at:new Date(Date.now()-30*864e5).toISOString()}));
+ok("dupes match by phone digits or name+city", dupeKeys({business_name:"Joe's Cafe",phone:"07700 900123",city:"Derby"}).some(k=>dupeKeys({business_name:"Other",phone:"+44 7700 900123"}).includes(k)) && dupeKeys({business_name:"Joe's Cafe!",city:"derby"}).some(k=>dupeKeys({business_name:"joes cafe",city:"Derby"}).includes(k)));
+ok("template file imports cleanly", csvToProspects(CSV_TEMPLATE).length===1 && csvToProspects(CSV_TEMPLATE)[0].business_name==="Joe's Barbers");
+ok("win chance rises through the funnel", WIN_CHANCE.new<WIN_CHANCE.replied && WIN_CHANCE.replied<WIN_CHANCE.proposal);
 console.log(f?`${f} failed`:"all passed"); process.exit(f?1:0);
