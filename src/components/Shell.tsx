@@ -125,13 +125,13 @@ const byCurrency = (t: Record<string, number>) =>
 // One line of text, currencies kept apart: "£150.00 · ₹42,000.00". Nothing is converted or added together.
 export const showTotals = (t: Record<string, number>) => {
   const keys = byCurrency(t);
-  return keys.length === 0 ? money(0) : keys.map((c) => money(t[c], c)).join(" · ");
+  return keys.length === 0 ? "—" : keys.map((c) => money(t[c], c)).join(" · ");
 };
 
 // Each currency on its own line. Use this for big numbers.
 export function Totals({ t, className = "", empty }: { t: Record<string, number>; className?: string; empty?: string }) {
   const keys = byCurrency(t);
-  if (keys.length === 0) return <div className={className}>{empty ?? money(0)}</div>;
+  if (keys.length === 0) return <div className={className}>{empty ?? "—"}</div>;
   return (
     <div className={className}>
       {keys.map((c) => <div key={c}>{money(t[c], c)}</div>)}

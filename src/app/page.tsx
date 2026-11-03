@@ -156,7 +156,7 @@ async function ClientPortal({ me }: { me: Me }) {
           <p className="tag !text-lime">[ Your workspace ]</p>
           <h1 className="mt-2 max-w-[85%] text-3xl font-bold leading-[1.05] tracking-tight sm:max-w-md sm:text-4xl">{client?.business_name}</h1>
           <div className="mt-6 flex flex-wrap items-end gap-x-8 gap-y-3">
-            <div><p className="tag !text-paper/60">Your plan</p><Totals t={total} className="text-2xl font-bold leading-snug" /><p className="text-sm font-medium text-paper/60">per month</p></div>
+            <div><p className="tag !text-paper/60">Your plan</p><Totals t={total} empty="None" className="text-2xl font-bold leading-snug" /><p className="text-sm font-medium text-paper/60">per month</p></div>
             <div><p className="tag !text-paper/60">Active services</p><p className="text-2xl font-bold">{activeSubs.length}</p></div>
             {hasOwed && <div><p className="tag !text-lime">Payment due</p><Totals t={owed} className="text-2xl font-bold leading-snug text-lime" /></div>}
           </div>
