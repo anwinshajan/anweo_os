@@ -18,6 +18,7 @@ const sql10 = mig("0010_notifications_clock_studio.sql");
 const sql11 = mig("0011_social_team_access.sql");
 const sql12 = mig("0012_payment_options.sql");
 const sql13 = mig("0013_tickets_updates.sql");
+const sql14 = mig("0014_history_admin_edit.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -41,6 +42,7 @@ await db.exec(sql10);
 await db.exec(sql11);
 await db.exec(sql12);
 await db.exec(sql13);
+await db.exec(sql14);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -681,6 +683,32 @@ await as(cA, async () => {
   ok("a client cannot post project updates", b);
 });
 await as(cB, async () => { ok("another client sees none of them", (await q(`select id from project_updates`)).rows.length === 0); });
+
+// =================== PHASE 5: history editing ===================
+const hid = (await q(`insert into activity_log(client_id, action, detail, client_visible) values ('${clA}', 'manual', 'Original wording', true) returning id`)).rows[0].id;
+await as(mgr, async () => {
+  const u = await q(`update activity_log set detail='hacked' where id=${hid}`);
+  ok("a manager cannot edit history", (u.affectedRows ?? u.rowCount ?? 0) === 0);
+  const d = await q(`delete from activity_log where id=${hid}`);
+  ok("a manager cannot delete history", (d.affectedRows ?? d.rowCount ?? 0) === 0);
+});
+await as(cA, async () => {
+  const u = await q(`update activity_log set detail='mine now' where id=${hid}`);
+  ok("a client cannot edit history", (u.affectedRows ?? u.rowCount ?? 0) === 0);
+});
+await as(admin, async () => {
+  const u = await q(`update activity_log set detail='Corrected wording', client_visible=false, created_at='2026-01-05T10:00:00Z' where id=${hid}`);
+  ok("the admin can edit history", (u.affectedRows ?? u.rowCount) === 1);
+});
+await as(cA, async () => { ok("hiding an entry removes it from the client's view", (await q(`select id from activity_log where id=${hid}`)).rows.length === 0); });
+await as(admin, async () => {
+  await q(`update activity_log set client_visible=true where id=${hid}`);
+});
+await as(cA, async () => { ok("showing it again makes it visible with the corrected wording", (await q(`select detail from activity_log where id=${hid}`)).rows[0]?.detail === "Corrected wording"); });
+await as(admin, async () => {
+  const d = await q(`delete from activity_log where id=${hid}`);
+  ok("the admin can delete an entry", (d.affectedRows ?? d.rowCount) === 1);
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

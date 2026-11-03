@@ -6,6 +6,7 @@ import Shell, { Empty, Totals, fmtDate, label, money, statusPill, totals } from 
 import UploadForm from "@/components/UploadForm";
 import BillingTab from "./BillingTab";
 import ProjectsTab from "./ProjectsTab";
+import HistoryTab from "./HistoryTab";
 import CountryCurrency from "@/components/CountryCurrency";
 import CurrencySelect from "@/components/CurrencySelect";
 import {
@@ -24,6 +25,7 @@ const TABS = [
   { key: "documents", label: "Documents" },
   { key: "work", label: "Work & content" },
   { key: "billing", label: "Billing", adminOnly: true },
+  { key: "history", label: "History", adminOnly: true },
 ];
 
 export default async function ClientDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
@@ -80,6 +82,7 @@ export default async function ClientDetail({ params, searchParams }: { params: P
         {tab === "documents" && <Documents id={id} lead={lead} />}
         {tab === "work" && <WorkAndContent id={id} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
         {tab === "billing" && admin && <BillingTab id={id} client={client} />}
+        {tab === "history" && admin && <HistoryTab id={id} />}
       </div>
     </Shell>
   );

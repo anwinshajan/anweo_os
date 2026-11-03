@@ -130,7 +130,7 @@ async function ClientPortal({ me }: { me: Me }) {
     sb.from("social_posts").select("id,kind,platform,title,caption,hashtags,status,scheduled_at,posted_at,post_media(id,mime_type,sort_order)").eq("client_id", cid).order("scheduled_at", { ascending: true, nullsFirst: false }),
     sb.from("invoices").select("id,period_label,amount,currency,status,issued_at,due_date,paid_at").eq("client_id", cid).order("issued_at", { ascending: false }),
     sb.from("documents").select("id,kind,title,status,created_at,signed_at,signed_by_name").eq("client_id", cid).order("created_at", { ascending: false }),
-    sb.from("activity_log").select("id,detail,created_at").eq("client_id", cid).eq("client_visible", true).order("created_at", { ascending: false }).limit(12),
+    sb.from("activity_log").select("id,detail,created_at").eq("client_id", cid).eq("client_visible", true).order("created_at", { ascending: false }).limit(40),
     sb.from("payment_plans").select("id,title,kind,currency,total_amount,recurring_amount,billing_interval,next_invoice_date,end_date,status,plan_installments(id,label,percent,amount,due_date,invoice_id,sort_order)").eq("client_id", cid).neq("status", "cancelled").order("created_at", { ascending: false }),
   ]);
   const todayIso = isoDay();

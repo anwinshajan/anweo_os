@@ -1389,3 +1389,38 @@ export const deleteProjectUpdateAction = safe(async (form: FormData) => {
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${str(form, "client_id")}`); revalidatePath("/");
 });
+
+/* ------------------------------------------------------------ client history (admin only) */
+export const addHistoryEntryAction = safe(async (form: FormData) => {
+  const me = await requireAdmin();
+  const sb = await supabaseServer();
+  const client_id = str(form, "client_id");
+  const detail = str(form, "detail").slice(0, 500);
+  if (!client_id || !detail) throw new Error("Write what happened");
+  const when = isoDateTime(form, "occurred_at");
+  const { error } = await sb.from("activity_log").insert({ actor: me.id, client_id, action: "manual", detail, client_visible: form.get("visible") === "on", ...(when ? { created_at: when } : {}) });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/clients/${client_id}`); revalidatePath("/");
+});
+
+export const updateHistoryEntryAction = safe(async (form: FormData) => {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const id = Number(str(form, "id"));
+  const detail = str(form, "detail").slice(0, 500);
+  if (!Number.isInteger(id) || !detail) throw new Error("Write what happened");
+  const when = isoDateTime(form, "occurred_at");
+  const { data, error } = await sb.from("activity_log").update({ detail, client_visible: form.get("visible") === "on", ...(when ? { created_at: when } : {}) }).eq("id", id).select("client_id").single();
+  if (error || !data) throw new Error(error?.message ?? "Entry not found");
+  revalidatePath(`/clients/${data.client_id}`); revalidatePath("/");
+});
+
+export const deleteHistoryEntryAction = safe(async (form: FormData) => {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const id = Number(str(form, "id"));
+  if (!Number.isInteger(id)) throw new Error("Entry not found");
+  const { data, error } = await sb.from("activity_log").delete().eq("id", id).select("client_id").single();
+  if (error || !data) throw new Error(error?.message ?? "Entry not found");
+  revalidatePath(`/clients/${data.client_id}`); revalidatePath("/");
+});
