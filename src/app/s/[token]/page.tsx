@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import FileIcon from "@/components/FileIcon";
 import { Logo } from "@/components/Logo";
 import SharedFiles from "@/components/SharedFiles";
@@ -32,11 +33,11 @@ export default async function PublicShare({ params }: { params: Promise<{ token:
         <h1 className="text-2xl font-bold leading-tight tracking-tight">{item.title}</h1>
         {item.notes && <p className="mt-1 text-sm text-mute">{item.notes}</p>}
         <div className="mt-5">
-          {item.kind === "folder" ? <SharedFiles rows={rows} /> : (
-            <a href={item.url ?? "#"} target="_blank" rel="noreferrer noopener" className="flex items-center justify-between gap-3 rounded-xl border border-edge bg-paper/60 px-4 py-4 hover:border-forest/40">
+          {item.kind === "folder" ? <SharedFiles rows={rows} viewBase={`/s/${token}/`} /> : (
+            <Link href={`/s/${token}/${item.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-edge bg-paper/60 px-4 py-4 hover:border-forest/40">
               <span className="flex min-w-0 items-center gap-3"><FileIcon kind="link" provider={item.provider} /><span className="min-w-0"><span className="block truncate font-semibold">{item.title}</span><span className="text-xs text-mute">{PROVIDERS[item.provider] ?? "Link"}</span></span></span>
-              <span className="btn-primary !py-2 text-sm">Open ↗</span>
-            </a>
+              <span className="btn-primary !py-2 text-sm">Open →</span>
+            </Link>
           )}
         </div>
       </div>

@@ -63,3 +63,36 @@ export function reachable<T extends { id: string; parent_id: string | null; stat
 export const newToken = (): string => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 export const isMissingTable = (e: { code?: string; message?: string } | null | undefined): boolean =>
   !!e && (e.code === "42P01" || e.code === "PGRST205" || /does not exist|could not find the table|schema cache/i.test(e.message ?? ""));
+
+// The address to show inside the app (an iframe) for a link, or null when that site doesn't allow being shown inside another page.
+export function embedUrl(url: string): string | null {
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  if (u.protocol !== "https:") return null;
+  const host = u.hostname.toLowerCase(), path = u.pathname;
+  const is = (...d: string[]) => d.some((x) => host === x || host.endsWith("." + x));
+  const ext = (path.split(".").pop() ?? "").toLowerCase();
+  const media = ["pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "mp4", "webm"];
+
+  if (host === "drive.google.com") {
+    const folder = path.match(/\/folders\/([\w-]+)/);
+    if (folder) return `https://drive.google.com/embeddedfolderview?id=${folder[1]}#list`;
+    const id = path.match(/\/file\/d\/([\w-]+)/)?.[1] ?? u.searchParams.get("id");
+    return id && /^[\w-]+$/.test(id) ? `https://drive.google.com/file/d/${id}/preview` : null;
+  }
+  if (host === "docs.google.com") {
+    if (path.startsWith("/forms/")) { const f = new URL(url); f.searchParams.set("embedded", "true"); return f.toString(); }
+    const m = path.match(/^\/(document|spreadsheets|presentation)\/d\/([\w-]+)/);
+    return m ? `https://docs.google.com/${m[1]}/d/${m[2]}/preview` : null;
+  }
+  if (host === "youtu.be" || is("youtube.com")) {
+    const id = host === "youtu.be" ? path.slice(1) : u.searchParams.get("v") ?? path.match(/^\/(?:shorts|embed|live)\/([\w-]+)/)?.[1] ?? "";
+    return /^[\w-]{6,15}$/.test(id) ? `https://www.youtube.com/embed/${id}` : null;
+  }
+  if (is("vimeo.com")) { const id = path.match(/^\/(\d+)/)?.[1]; return id ? `https://player.vimeo.com/video/${id}` : null; }
+  if (is("figma.com") && /^\/(file|design|proto|board|slides)\//.test(path)) return `https://www.figma.com/embed?embed_host=anweo&url=${encodeURIComponent(url)}`;
+  if (is("canva.com") && path.includes("/design/")) { const c = new URL(url); c.searchParams.delete("embed"); return `${c.toString()}${c.search ? "&" : "?"}embed`; }
+  if (is("dropbox.com") && media.includes(ext)) { const d = new URL(url); d.searchParams.delete("dl"); d.searchParams.set("raw", "1"); return d.toString(); }
+  if (media.includes(ext)) return url;
+  return null;
+}

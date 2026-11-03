@@ -161,3 +161,5 @@ Managers set recurring tasks per client (weekly or monthly) in the Work tab. A d
 ## Shared files
 
 Each client has a **Files** tab for links and folders (Google Drive, Dropbox, Figma, Canva and so on), so nothing uses this app's storage. Items are team-only by default. A teammate can **ask to share** a file or folder; a manager or the admin approves it (also listed on the Approvals page) and only then does the client see it on their dashboard. Editing something the client can already see sends it back for approval. A manager or admin can also create a **public link** (`/s/<token>`) that anyone can open without signing in, and turn it off at any time. Needs migration 0016.
+
+Linked files open **inside the app** (`/view/<id>`) when the site allows it: Google Drive files and folders, Docs, Sheets and Slides, YouTube, Vimeo, Figma, Canva, and direct PDFs and images. Sites that block embedding (for example Dropbox folders and Notion) show a card with an "Open in…" button. For Google files the viewer needs the file to be shared as "anyone with the link can view", otherwise Google shows a "request access" message inside the frame.

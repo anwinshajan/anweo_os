@@ -32,7 +32,7 @@ export default async function Approvals() {
           <div className="space-y-2">
             {(pendingFiles ?? []).map((f: any) => (
               <div key={f.id} className="card flex flex-wrap items-center justify-between gap-3 !p-4">
-                <div className="min-w-0"><p className="truncate font-semibold">{f.title}</p><p className="font-mono text-[11px] uppercase text-mute">{f.clients?.business_name} · {f.kind}{f.url ? <> · <a href={f.url} target="_blank" rel="noreferrer noopener" className="normal-case text-forest hover:underline">open</a></> : ""}</p></div>
+                <div className="min-w-0"><p className="truncate font-semibold">{f.title}</p><p className="font-mono text-[11px] uppercase text-mute">{f.clients?.business_name} · {f.kind}{f.kind === "link" ? <> · <a href={`/view/${f.id}`} className="normal-case text-forest hover:underline">preview</a></> : ""}</p></div>
                 <div className="flex gap-2">
                   <Form action={approveFileAction} quiet><input type="hidden" name="id" value={f.id} /><button className="btn-primary !py-2">Share with client</button></Form>
                   <Form action={returnFileAction} quiet><input type="hidden" name="id" value={f.id} /><button className="btn-danger !py-2">Not yet</button></Form>

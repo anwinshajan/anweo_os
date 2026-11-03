@@ -72,7 +72,7 @@ export default async function FilesTab({ id, folder, lead, origin }: { id: strin
                   <div className="min-w-0">
                     {r.kind === "folder"
                       ? <Link href={`${base}&f=${r.id}`} className="block truncate font-semibold hover:text-forest hover:underline">{r.title}</Link>
-                      : <a href={r.url ?? "#"} target="_blank" rel="noreferrer noopener" className="block truncate font-semibold hover:text-forest hover:underline">{r.title}</a>}
+                      : <Link href={`/view/${r.id}`} className="block truncate font-semibold hover:text-forest hover:underline">{r.title}</Link>}
                     <p className="truncate font-mono text-[10.5px] uppercase text-mute">{r.kind === "folder" ? `${all.filter((x) => x.parent_id === r.id).length} items` : PROVIDERS[r.provider] ?? "Link"}{r.notes ? ` · ${r.notes}` : ""}</p>
                   </div>
                 </div>
@@ -94,7 +94,7 @@ export default async function FilesTab({ id, folder, lead, origin }: { id: strin
                     <div><label className="label">Note</label><input name="notes" defaultValue={r.notes ?? ""} className="input" /></div>
                     {r.kind === "link" && <div className="sm:col-span-2"><label className="label">Link</label><input name="url" required defaultValue={r.url ?? ""} className="input" /></div>}
                     {r.status === "shared" && !lead && <p className="text-xs text-amber-800 sm:col-span-2">Changing something the client can already see sends it back for approval.</p>}
-                    <div className="sm:col-span-2"><button className="btn-primary">Save</button></div>
+                    <div className="flex flex-wrap items-center gap-3 sm:col-span-2"><button className="btn-primary">Save</button>{r.kind === "link" && r.url && <a href={r.url} target="_blank" rel="noreferrer noopener" className="text-xs font-medium text-forest hover:underline">Open the original ↗</a>}</div>
                   </Form>
                   {r.kind === "folder" && r.status === "internal" && (
                     <Form action={submitFileAction} quiet><input type="hidden" name="id" value={r.id} /><button className="btn-ghost !py-1.5 text-xs">{lead ? "Mark everything inside as ready" : "Ask to share this folder and everything in it"}</button></Form>

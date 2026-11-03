@@ -1,4 +1,4 @@
-import { detectProvider, normalizeUrl, descendantIds, pathTo, reachable, isMissingTable, newToken } from "../../src/lib/files.ts";
+import { detectProvider, normalizeUrl, descendantIds, pathTo, reachable, isMissingTable, newToken, embedUrl } from "../../src/lib/files.ts";
 let pass = 0, fail = 0;
 const ok = (n, c) => { c ? pass++ : fail++; console.log((c ? "PASS " : "FAIL ") + n); };
 
@@ -22,5 +22,13 @@ ok("a client reaches only shared items whose folders are shared too", reachable(
 ok("a shared file inside an unshared folder stays hidden", !reachable(rows).some((r) => r.id === "d"));
 ok("missing-table errors are recognised", isMissingTable({ code: "42P01" }) && isMissingTable({ code: "PGRST205" }) && isMissingTable({ message: "relation \"x\" does not exist" }) && !isMissingTable({ message: "permission denied" }) && !isMissingTable(null));
 ok("tokens are long and different each time", newToken().length === 32 && newToken() !== newToken());
+ok("a Drive file shows its preview", embedUrl("https://drive.google.com/file/d/1AbC_d-9/view?usp=sharing") === "https://drive.google.com/file/d/1AbC_d-9/preview" && embedUrl("https://drive.google.com/open?id=1AbC_d-9") === "https://drive.google.com/file/d/1AbC_d-9/preview");
+ok("a Drive folder shows its list", embedUrl("https://drive.google.com/drive/folders/1xYz?usp=sharing") === "https://drive.google.com/embeddedfolderview?id=1xYz#list");
+ok("Docs, Sheets and Slides show a preview", embedUrl("https://docs.google.com/document/d/ABC123/edit?tab=t.0") === "https://docs.google.com/document/d/ABC123/preview" && embedUrl("https://docs.google.com/spreadsheets/d/S1/edit#gid=0") === "https://docs.google.com/spreadsheets/d/S1/preview" && embedUrl("https://docs.google.com/presentation/d/P1/edit") === "https://docs.google.com/presentation/d/P1/preview");
+ok("YouTube and Vimeo play inside", embedUrl("https://youtu.be/dQw4w9WgXcQ") === "https://www.youtube.com/embed/dQw4w9WgXcQ" && embedUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5") === "https://www.youtube.com/embed/dQw4w9WgXcQ" && embedUrl("https://vimeo.com/123456") === "https://player.vimeo.com/video/123456");
+ok("Figma and Canva open inside", embedUrl("https://www.figma.com/design/abc/Home").startsWith("https://www.figma.com/embed?embed_host=anweo&url=") && embedUrl("https://www.canva.com/design/DAF/xyz/view") === "https://www.canva.com/design/DAF/xyz/view?embed");
+ok("direct PDFs and images show, Dropbox files use the raw view", embedUrl("https://example.com/menu.pdf") === "https://example.com/menu.pdf" && embedUrl("https://www.dropbox.com/s/abc/logo.png?dl=0") === "https://www.dropbox.com/s/abc/logo.png?raw=1");
+ok("sites that block embedding return null", embedUrl("https://www.dropbox.com/sh/xyz") === null && embedUrl("https://notion.so/page") === null && embedUrl("https://example.com/page") === null && embedUrl("http://insecure.example/a.pdf") === null && embedUrl("nonsense") === null);
+ok("look-alike hosts are not embedded as Google", embedUrl("https://drive.google.com.evil.example/file/d/abc/view") === null && embedUrl("https://evildocs.google.com.example/document/d/a/edit") === null);
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
