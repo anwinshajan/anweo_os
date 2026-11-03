@@ -120,6 +120,8 @@ export async function POST(req: Request) {
   const turns = [...history.map((h) => ({ role: h.role, content: h.content })), { role: "user", content: message }];
   try {
     if (useRouter) {
+      const ascii = (x: string) => x.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014\u00B7\u2022]/g, "-").replace(/\u20B9/g, "INR ").replace(/\u00A3/g, "GBP ").replace(/\u20AC/g, "EUR ").replace(/[^\x09\x0A\x20-\x7E]/g, "");
+      const slim = ascii(`You are Anweo AI, the assistant for Anweo, a digital agency. Be brief and friendly. Use only the facts below.\n\n${context.slice(0, 1800)}\n\nQuestion: ${message}`);
       const t0 = Date.now();
       const headers = { "content-type": "application/json", authorization: `Bearer ${routerKey}` };
       const merged = [{ role: "user", content: `${system}\n\n---\n\n${turns.map((t) => `${t.role}: ${t.content}`).join("\n")}` }];
@@ -132,6 +134,9 @@ export async function POST(req: Request) {
               { model, messages: [{ role: "system", content: system }, ...turns] },
               { model, messages: merged },
               { model, stream: true, messages: merged },
+              // Last resorts for fussy models: a short, plain-ASCII prompt, then just the question.
+              { model, messages: [{ role: "user", content: slim }] },
+              { model, messages: [{ role: "user", content: message }] },
             ]
           : [{ model, messages: merged }];
         for (const body of bodies) {
