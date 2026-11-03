@@ -38,10 +38,11 @@ export default async function Approvals() {
               {p.caption && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-paper px-3.5 py-3 text-sm text-ink/85">{p.caption}</p>}
               <p className="mt-2 font-mono text-[11px] text-mute">{when(p.scheduled_at)}</p>
               {lead && (
-                <Form action={reviewPostAction} className="mt-4 flex gap-2">
+                <Form action={reviewPostAction} className="mt-4 flex flex-wrap gap-2" quiet>
                   <input type="hidden" name="id" value={p.id} />
+                  <input name="note" placeholder="Feedback (needed to request changes)" className="input min-w-0 flex-1" aria-label="Feedback" />
                   <button name="decision" value="approve" className="btn-primary flex-1 sm:flex-none">Approve</button>
-                  <button name="decision" value="reject" className="btn-danger flex-1 sm:flex-none">Reject</button>
+                  <button name="decision" value="reject" className="btn-danger flex-1 sm:flex-none">Request changes</button>
                 </Form>
               )}
             </div>

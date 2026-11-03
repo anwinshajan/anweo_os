@@ -14,6 +14,8 @@ const sql6 = mig("0006_currencies.sql");
 const sql7 = mig("0007_payment_plans.sql");
 const sql8 = mig("0008_invoice_documents.sql");
 const sql9 = mig("0009_project_payment_link.sql");
+const sql10 = mig("0010_notifications_clock_studio.sql");
+const sql11 = mig("0011_social_team_access.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -33,6 +35,8 @@ await db.exec(sql6);
 await db.exec(sql7);
 await db.exec(sql8);
 await db.exec(sql9);
+await db.exec(sql10);
+await db.exec(sql11);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -64,7 +68,7 @@ await set(devSocial, "developer", null, true); await set(cA, "client", clA); awa
 const svc = (await q(`select id from services limit 1`)).rows[0].id;
 await q(`insert into client_services(client_id, service_id, price_monthly) values ($1,$2,100),($3,$2,200)`, [clA, svc, clB]);
 await q(`insert into work_items(client_id,title,visible_to_client) values ($1,'A visible',true),($1,'A internal',false),($2,'B work',true)`, [clA, clB]);
-await q(`insert into social_posts(client_id,caption,status) values ($1,'A idea','idea'),($1,'A awaiting','awaiting_approval'),($2,'B posted','posted')`, [clA, clB]);
+await q(`insert into social_posts(client_id,caption,status) values ($1,'A idea','idea'),($1,'A awaiting','awaiting_approval'),($1,'A approved','approved'),($2,'B posted','posted')`, [clA, clB]);
 await q(`insert into invoices(client_id,period_label,amount) values ($1,'Nov',100),($2,'Nov',200)`, [clA, clB]);
 await q(`insert into invoices(client_id,period_label,amount,status) values ($1,'Draft',50,'draft')`, [clA]);
 
@@ -86,7 +90,7 @@ await as(cA, async () => {
   const w = (await q(`select title from work_items`)).rows;
   ok("client A sees only visible own work", w.length === 1 && w[0].title === "A visible");
   const p = (await q(`select caption from social_posts`)).rows;
-  ok("client A sees awaiting post but not idea", p.length === 1 && p[0].caption === "A awaiting");
+  ok("client A sees only approved posts (not ideas or awaiting review)", p.length === 1 && p[0].caption === "A approved");
   ok("client A sees only own invoices", (await q(`select id from invoices`)).rows.length === 1);
   const act = (await q(`select detail from activity_log`)).rows;
   ok("client A sees only own client-visible history", act.length === 1 && act[0].detail === "Service added: Social");
@@ -531,6 +535,84 @@ await as(cA, async () => {
   const inv = (await q(`select invoice_no from invoices`)).rows;
   ok("a client's invoices carry their numbers", inv.length > 0 && inv.every((r) => r.invoice_no > 0));
 });
+
+// =================== PHASE 3: notifications, clock, studio ===================
+await q(`insert into notifications(user_id,title) values ($1,'for dev'),($2,'for admin')`, [dev, admin]);
+await q(`insert into push_subscriptions(user_id,endpoint) values ($1,'https://push.example/dev'),($2,'https://push.example/admin')`, [dev, admin]);
+await as(dev, async () => {
+  ok("a user sees only their own notifications", (await q(`select title from notifications`)).rows.map((r) => r.title).join() === "for dev");
+  ok("a user sees only their own push devices", (await q(`select endpoint from push_subscriptions`)).rows.length === 1);
+  let b = false; try { await q(`insert into notifications(user_id,title) values ('${dev}','forged')`); } catch { b = true; }
+  ok("users cannot create notifications themselves", b);
+  const u = await q(`update notifications set read_at = now() where user_id='${dev}'`);
+  ok("a user can mark their own notification read", (u.affectedRows ?? u.rowCount) === 1);
+  const u2 = await q(`update notifications set read_at = now() where user_id='${admin}'`);
+  ok("a user cannot touch someone else's notification", (u2.affectedRows ?? u2.rowCount ?? 0) === 0);
+});
+
+// ---- clock in / out
+await as(dev, async () => {
+  await q(`insert into time_entries(user_id) values ('${dev}')`);
+  ok("staff can clock in", true);
+  let b = false; try { await q(`insert into time_entries(user_id) values ('${dev}')`); } catch { b = true; }
+  ok("cannot clock in twice", b);
+  b = false; try { await q(`update time_entries set clock_in = now() - interval '5 hours' where user_id='${dev}'`); } catch { b = true; }
+  ok("clock-in time cannot be edited", b);
+  b = false; try { await q(`update time_entries set clock_out = now() + interval '3 hours' where user_id='${dev}'`); } catch { b = true; }
+  ok("cannot clock out in the future", b);
+  b = false; try { await q(`insert into time_entries(user_id, clock_in, clock_out) values ('${sm}', now(), null)`); } catch { b = true; }
+  ok("cannot clock in for someone else", b);
+});
+await q(`update time_entries set clock_in = now() - interval '2 hours' where user_id = $1`, [dev]);
+await as(dev, async () => {
+  const u = await q(`update time_entries set clock_out = now(), note='done' where user_id='${dev}' and clock_out is null`);
+  ok("staff can clock out", (u.affectedRows ?? u.rowCount) === 1);
+  const d = await q(`delete from time_entries where user_id='${dev}'`);
+  ok("staff cannot delete time entries", (d.affectedRows ?? d.rowCount ?? 0) === 0);
+  let b = false; try { await q(`insert into time_entries(user_id, clock_in) values ('${dev}', now() - interval '3 hours')`); } catch { b = true; }
+  ok("cannot back-date a clock in", b);
+});
+await as(sm, async () => { ok("another team member cannot see my hours", (await q(`select id from time_entries`)).rows.length === 0); });
+await as(mgr, async () => { ok("a manager can see the team's hours", (await q(`select id from time_entries`)).rows.length === 1); });
+await as(cA, async () => {
+  let b = false; try { await q(`insert into time_entries(user_id) values ('${cA}')`); } catch { b = true; }
+  ok("a client cannot clock in", b);
+  ok("a client sees no hours", (await q(`select id from time_entries`)).rows.length === 0);
+});
+await as(admin, async () => {
+  const d = await q(`delete from time_entries where user_id='${dev}'`);
+  ok("admin can delete a time entry", (d.affectedRows ?? d.rowCount) === 1);
+});
+
+// ---- studio
+const aw = (await q(`insert into social_posts(client_id,caption,status) values ('${clA}','studio awaiting','awaiting_approval') returning id`)).rows[0].id;
+const ap = (await q(`insert into social_posts(client_id,caption,status) values ('${clA}','studio approved','approved') returning id`)).rows[0].id;
+await q(`insert into post_media(post_id, storage_path, file_name) values ($1,'posts/x/a.png','a.png'),($2,'posts/x/b.png','b.png')`, [ap, aw]);
+await q(`insert into post_comments(post_id, author_id, body) values ($1, $2, 'internal feedback')`, [ap, mgr]);
+await as(cA, async () => {
+  const m = (await q(`select file_name from post_media`)).rows;
+  ok("client sees media of approved posts only", m.length === 1 && m[0].file_name === "a.png");
+  ok("client cannot see internal comments", (await q(`select id from post_comments`)).rows.length === 0);
+  let b = false; try { await q(`insert into post_media(post_id, storage_path) values ('${ap}','posts/x/z.png')`); } catch { b = true; }
+  ok("client cannot add media", b);
+});
+await as(sm, async () => {
+  ok("social manager sees all media and comments", (await q(`select id from post_media`)).rows.length === 2 && (await q(`select id from post_comments`)).rows.length === 1);
+  await q(`insert into post_comments(post_id, author_id, body) values ('${aw}', '${sm}', 'looks good')`);
+  ok("team members can comment", true);
+  let b = false; try { await q(`insert into post_comments(post_id, author_id, body) values ('${aw}', '${mgr}', 'forged')`); } catch { b = true; }
+  ok("cannot comment as someone else", b);
+  await q(`update social_posts set caption = 'A approved v2' where id='${ap}'`);
+  const st = (await q(`select status from social_posts where id='${ap}'`)).rows[0].status;
+  ok("editing approved content sends it back for review", st === "awaiting_approval");
+});
+await as(cA, async () => { ok("client no longer sees the edited post until re-approved", (await q(`select id from social_posts where id='${ap}'`)).rows.length === 0); });
+await as(mgr, async () => {
+  await q(`update social_posts set status='approved' where id='${ap}'`);
+  await q(`update social_posts set caption = 'A approved v3' where id='${ap}'`);
+  ok("a manager can edit approved content without losing approval", (await q(`select status from social_posts where id='${ap}'`)).rows[0].status === "approved");
+});
+await as(cA, async () => { ok("client sees it again once approved", (await q(`select id from social_posts where id='${ap}'`)).rows.length === 1); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

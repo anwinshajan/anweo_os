@@ -35,7 +35,7 @@ export async function loadInvoiceDoc(id: string): Promise<InvoiceDoc | null> {
     company: {
       legalName: co?.legal_name ?? "Anweo", address: co?.address ?? null, email: co?.email ?? null, phone: co?.phone ?? null,
       website: co?.website ?? null, taxLabel: co?.tax_label ?? "Tax ID", taxNumber: co?.tax_number ?? null,
-      paymentDetails: co?.payment_details ?? null, note: co?.invoice_note ?? null,
+      paymentDetails: co?.payment_details ?? null, note: co?.invoice_note ?? null, termsConditions: co?.terms_conditions ?? null,
     },
     terms: termsSentence(c.payment_terms_days, Number(c.late_interest_percent), c.late_grace_days),
   };

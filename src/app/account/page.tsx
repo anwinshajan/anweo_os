@@ -2,6 +2,7 @@ import Link from "next/link";
 import Form from "@/components/Form";
 import { redirect } from "next/navigation";
 import Shell, { PageHead } from "@/components/Shell";
+import PushToggle from "@/components/PushToggle";
 import ChangePassword from "@/components/ChangePassword";
 import { updateOwnProfileAction } from "@/app/actions";
 import { getMe } from "@/lib/supabase-server";
@@ -24,6 +25,10 @@ export default async function Account() {
             <div><label className="label">Phone / WhatsApp</label><input name="phone" defaultValue={me.phone ?? ""} className="input" autoComplete="tel" /></div>
             <div className="sm:col-span-2"><button className="btn-primary">Save profile</button></div>
           </Form>
+        </section>
+        <section className="card">
+          <p className="tag mb-3">[ Notifications ]</p>
+          <PushToggle />
         </section>
         <section className="card">
           <p className="tag mb-3">[ Password ]</p>

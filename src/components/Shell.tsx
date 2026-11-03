@@ -4,6 +4,9 @@ import type { Me } from "@/lib/supabase-server";
 import { roleLabel, isAdminRole, isLeadRole } from "@/lib/roles";
 import { formatMoney } from "@/lib/currency";
 import { Logo } from "./Logo";
+import { Suspense } from "react";
+import Bell from "./Bell";
+import PushToggle from "./PushToggle";
 import { BottomNav, TopNav, type NavItem } from "./NavLinks";
 
 // Everything a person can open, by role. Used for the desktop menu and the "More" page.
@@ -22,7 +25,9 @@ export function navFor(me: Me): NavItem[] {
     { href: "/", label: "Clients", icon: "clients" },
     { href: "/tasks", label: "Tasks", icon: "tasks" },
     { href: "/chat", label: "Chat", icon: "chat" },
+    { href: "/studio", label: "Studio", icon: "studio" },
     { href: "/approvals", label: "Approvals", icon: "approvals" },
+    { href: "/clock", label: "Clock", icon: "clock", more: true },
     ...(lead ? [{ href: "/catalogue", label: "Services", icon: "catalogue" } as NavItem] : []),
     ...(admin ? [{ href: "/finance", label: "Finance", icon: "finance" } as NavItem] : []),
     ...(admin ? [{ href: "/transactions", label: "Transactions", icon: "transactions" } as NavItem] : []),
@@ -53,6 +58,7 @@ export default function Shell({ me, children }: { me: Me; children: React.ReactN
           <Link href="/" aria-label="Anweo home"><Logo /></Link>
           <TopNav items={all.filter((i) => !i.more)} />
           <div className="flex items-center gap-2.5">
+            <Suspense fallback={<span className="h-9 w-9" />}><Bell /></Suspense>
             <Link href="/account" className="flex items-center gap-2.5" aria-label="My account">
               <div className="hidden text-right leading-tight sm:block">
                 <p className="max-w-[160px] truncate text-sm font-semibold">{me.full_name || me.email}</p>
@@ -64,7 +70,7 @@ export default function Shell({ me, children }: { me: Me; children: React.ReactN
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-16">{children}</main>
+      <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-16"><PushToggle compact />{children}</main>
       <BottomNav items={bottom} />
     </div>
   );

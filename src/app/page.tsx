@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Form from "@/components/Form";
 import { redirect } from "next/navigation";
+import PostThumb from "@/components/PostThumb";
 import Shell, { Empty, PageHead, Totals, fmtDate, label, money, statusPill, totals } from "@/components/Shell";
 import { Corner, Logo } from "@/components/Logo";
 import { signDocumentAction } from "./actions";
@@ -124,7 +125,7 @@ async function ClientPortal({ me }: { me: Me }) {
     sb.from("client_services").select("id,price_monthly,currency,status,start_date,services(name,description)").eq("client_id", cid).order("created_at"),
     sb.from("projects").select("id,title,description,status,due_date,milestones(id,title,done,sort_order)").eq("client_id", cid).order("created_at", { ascending: false }),
     sb.from("work_items").select("id,title,status,due_date,updated_at").eq("client_id", cid).order("updated_at", { ascending: false }),
-    sb.from("social_posts").select("id,kind,platform,caption,status,scheduled_at,posted_at").eq("client_id", cid).order("scheduled_at", { ascending: true, nullsFirst: false }),
+    sb.from("social_posts").select("id,kind,platform,title,caption,hashtags,status,scheduled_at,posted_at,post_media(id,mime_type,sort_order)").eq("client_id", cid).order("scheduled_at", { ascending: true, nullsFirst: false }),
     sb.from("invoices").select("id,period_label,amount,currency,status,issued_at,due_date,paid_at").eq("client_id", cid).order("issued_at", { ascending: false }),
     sb.from("documents").select("id,kind,title,status,created_at,signed_at,signed_by_name").eq("client_id", cid).order("created_at", { ascending: false }),
     sb.from("activity_log").select("id,detail,created_at").eq("client_id", cid).eq("client_visible", true).order("created_at", { ascending: false }).limit(12),
@@ -320,14 +321,18 @@ async function ClientPortal({ me }: { me: Me }) {
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="card">
-          <p className="tag mb-3">[ Upcoming content ]</p>
-          <div className="space-y-2">
-            {upcoming.length === 0 && <Empty>Nothing in the pipeline yet.</Empty>}
-            {upcoming.map((p) => (
-              <div key={p.id} className="rounded-xl border border-edge bg-paper/60 p-3 text-sm">
-                <div className="flex items-center justify-between gap-2"><span className="font-medium capitalize">{p.kind} · {p.platform}</span><span className={`pill ${statusPill(p.status)}`}>{label(p.status)}</span></div>
-                {p.caption && <p className="mt-1.5 line-clamp-2 text-ink/70">{p.caption}</p>}
-                <p className="mt-1.5 font-mono text-[11px] text-mute">{p.scheduled_at ? fmtDate(p.scheduled_at, true) : "To be scheduled"}</p>
+          <p className="tag mb-3">[ Approved content, coming up ]</p>
+          <div className="space-y-3">
+            {upcoming.length === 0 && <Empty>Nothing approved and waiting right now.</Empty>}
+            {upcoming.map((p: any) => (
+              <div key={p.id} className="overflow-hidden rounded-xl border border-edge bg-paper/60 text-sm">
+                {(p.post_media ?? []).length > 0 && <PostThumb media={[...p.post_media].sort((a: any, b: any) => a.sort_order - b.sort_order)} kind={p.kind} className="aspect-[16/10] w-full" />}
+                <div className="p-3">
+                  <div className="flex items-center justify-between gap-2"><span className="font-medium capitalize">{p.title || `${p.kind} · ${p.platform}`}</span><span className={`pill ${statusPill(p.status)}`}>{label(p.status)}</span></div>
+                  {p.caption && <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap text-ink/70">{p.caption}</p>}
+                  {p.hashtags && <p className="mt-1 text-xs text-forest">{p.hashtags}</p>}
+                  <p className="mt-1.5 font-mono text-[11px] text-mute">{p.kind} · {p.platform} · {p.scheduled_at ? fmtDate(p.scheduled_at, true) : "To be scheduled"}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -337,7 +342,7 @@ async function ClientPortal({ me }: { me: Me }) {
           <div className="space-y-2">
             {published.length === 0 && <Empty>Nothing published yet.</Empty>}
             {published.map((p) => (
-              <div key={p.id} className="row"><span className="capitalize">{p.kind} · {p.platform}</span><span className="font-mono text-[11px] text-mute">{fmtDate(p.posted_at, true)}</span></div>
+              <div key={p.id} className="row"><span className="flex min-w-0 items-center gap-3">{(p as any).post_media?.length > 0 && <PostThumb media={(p as any).post_media} kind={p.kind} className="h-10 w-10 shrink-0 rounded-lg" />}<span className="min-w-0 truncate capitalize">{(p as any).title || `${p.kind} · ${p.platform}`}</span></span><span className="font-mono text-[11px] text-mute">{fmtDate(p.posted_at, true)}</span></div>
             ))}
           </div>
         </section>

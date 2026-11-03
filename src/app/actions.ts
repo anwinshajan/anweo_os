@@ -1,5 +1,7 @@
 "use server";
 import { randomUUID } from "node:crypto";
+import { after } from "next/server";
+import { adminIds, clientUserIds, leadIds, notifyUsers, snip, staffIds } from "@/lib/notify";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getMe, supabaseAdmin, supabaseServer } from "@/lib/supabase-server";
@@ -21,6 +23,13 @@ function safe<A extends unknown[]>(fn: (...a: A) => Promise<void>) {
     }
   };
 }
+
+// Run after the response is sent, so notifications never slow an action down or make it fail.
+function later(fn: () => Promise<void>) {
+  const run = async () => { try { await fn(); } catch (e) { console.error("notification failed", e); } };
+  try { after(run); } catch { void run(); }
+}
+const who = (me: { full_name: string | null; email: string | null }) => me.full_name || me.email || "Someone";
 
 async function requireActive() {
   const me = await getMe();
@@ -251,6 +260,8 @@ export const addWorkAction = safe(async (form: FormData) => {
   });
   if (error) throw new Error(error.message);
   await logEvent(sb, me.id, client_id, "work_added", title, false);
+  const assignee = str(form, "assignee");
+  if (assignee) later(() => notifyUsers([assignee], { title: "New task for you", body: snip(title), url: "/tasks" }, me.id));
   revalidatePath(`/clients/${client_id}`);
   revalidatePath("/tasks");
 });
@@ -263,9 +274,15 @@ export const setWorkStatusAction = safe(async (form: FormData) => {
   const client_id = str(form, "client_id");
   if (!["todo", "in_progress", "review", "done"].includes(status)) return;
   const patch: { status: string; assignee?: string | null } = { status };
-  if (form.has("assignee")) patch.assignee = str(form, "assignee") || null;
+  let newAssignee: string | null = null;
+  if (form.has("assignee")) {
+    patch.assignee = str(form, "assignee") || null;
+    const { data: before } = await sb.from("work_items").select("assignee").eq("id", id).single();
+    if (patch.assignee && patch.assignee !== before?.assignee) newAssignee = patch.assignee;
+  }
   const { data: w, error } = await sb.from("work_items").update(patch).eq("id", id).select("title,visible_to_client,client_id").single();
   if (error || !w) throw new Error(error?.message ?? "Could not change the task status");
+  if (newAssignee) { const to = newAssignee; later(() => notifyUsers([to], { title: "A task was assigned to you", body: snip(w.title), url: "/tasks" }, me.id)); }
   if (w && status === "done") {
     await logEvent(sb, me.id, w.client_id, "work_done", `Completed: ${w.title}`, w.visible_to_client);
   }
@@ -329,7 +346,10 @@ export const setProjectStatusAction = safe(async (form: FormData) => {
   if (!["planning", "in_progress", "review", "completed", "on_hold"].includes(status)) return;
   const { data: p, error } = await sb.from("projects").update({ status }).eq("id", str(form, "id")).select("client_id,title,visible_to_client").single();
   if (error || !p) throw new Error(error?.message ?? "Could not change the project status");
-  if (status === "completed") await invoiceOnDelivery(sb, str(form, "id"), isAdminRole(me.role));
+  if (status === "completed") {
+    await invoiceOnDelivery(sb, str(form, "id"), isAdminRole(me.role));
+    if (p.visible_to_client) later(async () => notifyUsers(await clientUserIds(p.client_id), { title: "Project completed", body: p.title, url: "/" }));
+  }
   if (p && status === "completed") await logEvent(sb, me.id, p.client_id, "project_completed", `Project completed: ${p.title}`, p.visible_to_client);
   revalidatePath(`/clients/${str(form, "client_id")}`);
   revalidatePath("/");
@@ -412,7 +432,10 @@ export async function registerDocumentAction(form: FormData): Promise<{ error?: 
       created_by: me.id,
     });
     if (error) return { error: error.message };
-    if (visible) await logEvent(sb, me.id, client_id, "document_shared", `${isContract ? "Contract" : "Document"} shared: ${str(form, "title") || str(form, "file_name")}`, true);
+    if (visible) {
+      await logEvent(sb, me.id, client_id, "document_shared", `${isContract ? "Contract" : "Document"} shared: ${str(form, "title") || str(form, "file_name")}`, true);
+      later(async () => notifyUsers(await clientUserIds(client_id), { title: isContract ? "A contract is ready to sign" : "New document shared with you", body: snip(str(form, "title") || str(form, "file_name")), url: "/" }, me.id));
+    }
     revalidatePath(`/clients/${client_id}`);
     return {};
   } catch (e) {
@@ -472,6 +495,11 @@ export async function sendMessageAction(form: FormData): Promise<{ error?: strin
     const sb = await supabaseServer();
     const { error } = await sb.from("messages").insert({ client_id: target, sender_id: me.id, body });
     if (error) return { error: error.message };
+    later(async () => {
+      if (!target) await notifyUsers(await staffIds(), { title: `${who(me)} in Team chat`, body: snip(body), url: "/chat/team" }, me.id);
+      else if (me.role === "client") await notifyUsers(await leadIds(), { title: `${who(me)} (client)`, body: snip(body), url: `/chat/c/${target}` }, me.id);
+      else await notifyUsers(await clientUserIds(target), { title: "Message from the Anweo team", body: snip(body), url: `/chat/c/${target}` }, me.id);
+    });
     return {};
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Message not sent" };
@@ -496,6 +524,7 @@ export const addPostAction = safe(async (form: FormData) => {
     created_by: me.id,
   });
   if (error) throw new Error(error.message);
+  later(async () => notifyUsers(await leadIds(), { title: "Content waiting for approval", body: `${who(me)} submitted a ${str(form, "kind") || "post"}`, url: "/approvals" }, me.id));
   revalidatePath(`/clients/${client_id}`);
   revalidatePath("/approvals");
 });
@@ -514,11 +543,22 @@ export const reviewPostAction = safe(async (form: FormData) => {
   }
   const next = decision === "approve" ? "approved" : decision === "reject" ? "rejected" : decision === "posted" ? "posted" : null;
   if (!next) return;
+  if (next === "rejected" && !str(form, "note")) throw new Error("Add a short note so the team knows what to change");
   const patch: Record<string, unknown> = { status: next };
   if (next === "approved") patch.approved_by = me.id;
+  if (next === "approved" || next === "rejected") { patch.reviewed_by = me.id; patch.reviewed_at = new Date().toISOString(); patch.review_note = str(form, "note") || null; }
   if (next === "posted") patch.posted_at = new Date().toISOString();
-  const { data: p, error } = await sb.from("social_posts").update(patch).eq("id", id).select("client_id,kind,platform").single();
+  const { data: p, error } = await sb.from("social_posts").update(patch).eq("id", id).select("client_id,kind,platform,title,caption,created_by").single();
   if (error) throw new Error(error.message);
+  if (p) {
+    const label = snip(p.title || p.caption || `${p.kind} for ${p.platform}`, 70);
+    const note = str(form, "note");
+    if (next === "approved") later(async () => {
+      await notifyUsers([p.created_by], { title: "Your content was approved", body: label, url: `/studio/${id}` }, me.id);
+      await notifyUsers(await clientUserIds(p.client_id), { title: "New content is ready for you", body: label, url: "/" });
+    });
+    if (next === "rejected") later(() => notifyUsers([p.created_by], { title: "Changes requested", body: note ? snip(`${label}: ${note}`) : label, url: `/studio/${id}` }, me.id));
+  }
   if (p && next !== "rejected") {
     const text = next === "approved" ? `Approved: ${p.kind} for ${p.platform}` : `Published: ${p.kind} on ${p.platform}`;
     await logEvent(sb, me.id, p.client_id, next === "approved" ? "post_approved" : "post_published", text, true);
@@ -558,7 +598,8 @@ export const markInvoicePaidAction = safe(async (form: FormData) => {
     .select("period_label,client_id")
     .single();
   if (!inv) throw new Error("That invoice could not be found");
-  if (inv) await logEvent(sb, me.id, inv.client_id, "invoice_paid", `Payment received: ${inv.period_label}`, true);
+  await logEvent(sb, me.id, inv.client_id, "invoice_paid", `Payment received: ${inv.period_label}`, true);
+  later(async () => notifyUsers(await clientUserIds(inv.client_id), { title: "Payment received, thank you", body: inv.period_label, url: "/" }));
   revalidatePath(`/clients/${inv?.client_id}`);
   revalidatePath("/finance"); revalidatePath("/transactions");
 });
@@ -569,7 +610,10 @@ export const sendDraftInvoiceAction = safe(async (form: FormData) => {
   const { data: draftInv } = await sb.from("invoices").select("client_id,clients(payment_terms_days)").eq("id", str(form, "id")).eq("status", "draft").single();
   const terms = (draftInv?.clients as unknown as { payment_terms_days: number } | null)?.payment_terms_days ?? 7;
   const { data: inv } = await sb.from("invoices").update({ status: "due", issued_at: isoDay(), due_date: addDays(isoDay(), terms) }).eq("id", str(form, "id")).eq("status", "draft").select("period_label,client_id").single();
-  if (inv) await logEvent(sb, me.id, inv.client_id, "invoice_issued", `Invoice issued: ${inv.period_label}`, true);
+  if (inv) {
+    await logEvent(sb, me.id, inv.client_id, "invoice_issued", `Invoice issued: ${inv.period_label}`, true);
+    later(async () => notifyUsers(await clientUserIds(inv.client_id), { title: "New invoice", body: inv.period_label, url: "/" }));
+  }
   revalidatePath(`/clients/${inv?.client_id}`);
   revalidatePath("/finance"); revalidatePath("/transactions");
 });
@@ -881,6 +925,7 @@ export const saveCompanySettingsAction = safe(async (form: FormData) => {
     tax_number: str(form, "tax_number") || null,
     payment_details: str(form, "payment_details") || null,
     invoice_note: str(form, "invoice_note") || null,
+    terms_conditions: str(form, "terms_conditions") || null,
   });
   if (error) throw new Error(error.message);
   revalidatePath("/settings");
@@ -1008,4 +1053,201 @@ export const deleteMilestoneAction = safe(async (form: FormData) => {
   const { error } = await sb.from("milestones").delete().eq("id", str(form, "id"));
   if (error) throw new Error(error.message);
   revalidatePath(`/clients/${str(form, "client_id")}`);
+});
+
+/* ------------------------------------------------------------ notifications */
+export const savePushSubscriptionAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  const endpoint = str(form, "endpoint");
+  const p256dh = str(form, "p256dh");
+  const auth = str(form, "auth");
+  if (!/^https:\/\//.test(endpoint) || !p256dh || !auth) throw new Error("That device could not be registered");
+  const admin = supabaseAdmin();
+  // A device belongs to whoever is signed in on it now.
+  await admin.from("push_subscriptions").delete().eq("endpoint", endpoint);
+  const { error } = await admin.from("push_subscriptions").insert({ user_id: me.id, kind: "web", endpoint, keys: { p256dh, auth }, user_agent: str(form, "ua") || null });
+  if (error) throw new Error(error.message);
+});
+
+export const removePushSubscriptionAction = safe(async (form: FormData) => {
+  const me = await requireActive();
+  await supabaseAdmin().from("push_subscriptions").delete().eq("endpoint", str(form, "endpoint")).eq("user_id", me.id);
+});
+
+export const markNotificationsReadAction = safe(async () => {
+  await requireActive();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null);
+  if (error) throw new Error(error.message);
+  revalidatePath("/notifications");
+});
+
+/* ------------------------------------------------------------ clock in / out */
+export const clockInAction = safe(async () => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("time_entries").insert({ user_id: me.id });
+  if (error) throw new Error(error.code === "23505" ? "You're already clocked in" : error.message);
+  revalidatePath("/clock");
+});
+
+export const clockOutAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const endedRaw = str(form, "ended_at");
+  const ended = endedRaw ? new Date(endedRaw) : new Date();
+  if (Number.isNaN(ended.getTime())) throw new Error("That finish time isn't valid");
+  const { data, error } = await sb.from("time_entries").update({ clock_out: ended.toISOString(), note: str(form, "note").slice(0, 300) || null }).eq("user_id", me.id).is("clock_out", null).select("id");
+  if (error) throw new Error(error.message.includes("check") ? "The finish time must be after you clocked in" : error.message);
+  if (!data?.length) throw new Error("You're not clocked in");
+  revalidatePath("/clock");
+});
+
+export const deleteTimeEntryAction = safe(async (form: FormData) => {
+  await requireAdmin();
+  const sb = await supabaseServer();
+  const { error } = await sb.from("time_entries").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  revalidatePath("/clock");
+});
+
+/* ------------------------------------------------------------ social studio */
+const POST_KINDS = ["post", "reel", "story", "carousel"];
+const MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "video/mp4", "video/quicktime"];
+
+function requireSocial(me: Awaited<ReturnType<typeof requireStaff>>) {
+  if (!canSocial(me)) throw new Error("You don't have permission to work on social content");
+}
+const isoDateTime = (f: FormData, k: string) => { const v = str(f, k); const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d.toISOString() : null; };
+
+// Create or update a post. New posts start as an idea (or straight as a draft).
+export const savePostAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const kind = POST_KINDS.includes(str(form, "kind")) ? str(form, "kind") : "post";
+  const fields = {
+    title: str(form, "title").slice(0, 140) || null,
+    caption: str(form, "caption").slice(0, 2200) || null,
+    hashtags: str(form, "hashtags").slice(0, 500) || null,
+    notes: str(form, "notes").slice(0, 3000) || null,
+    kind,
+    platform: str(form, "platform") || "instagram",
+    scheduled_at: isoDateTime(form, "scheduled_at"),
+  };
+  if (id) {
+    const { error } = await sb.from("social_posts").update(fields).eq("id", id);
+    if (error) throw new Error(error.message);
+    revalidatePath(`/studio/${id}`); revalidatePath("/studio"); revalidatePath("/approvals");
+    return;
+  }
+  const client_id = str(form, "client_id");
+  if (!client_id) throw new Error("Pick which client this is for");
+  if (!fields.title && !fields.caption && !fields.notes) throw new Error("Give it a title or a few words about the idea");
+  const { data, error } = await sb.from("social_posts").insert({ ...fields, client_id, status: str(form, "stage") === "draft" ? "in_progress" : "idea", created_by: me.id }).select("id").single();
+  if (error || !data) throw new Error(error?.message ?? "Could not create it");
+  revalidatePath("/studio");
+  redirect(`/studio/${data.id}`);
+});
+
+// Move a post along the creator's side of the workflow. Approving is the manager's job (reviewPostAction).
+export const setPostStageAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const to = str(form, "to");
+  const { data: p } = await sb.from("social_posts").select("status,caption,title,kind,created_by").eq("id", id).single();
+  if (!p) throw new Error("Post not found");
+  const allowed: Record<string, string[]> = { idea: ["in_progress"], in_progress: ["idea", "awaiting_approval"], awaiting_approval: ["in_progress"], rejected: ["in_progress", "awaiting_approval"] };
+  if (!(allowed[p.status] ?? []).includes(to)) throw new Error("That step isn't available right now");
+  if (to === "awaiting_approval") {
+    const { count } = await sb.from("post_media").select("id", { count: "exact", head: true }).eq("post_id", id);
+    if (!p.caption && !count) throw new Error("Add a caption or upload your work before sending it for review");
+  }
+  const { error } = await sb.from("social_posts").update({ status: to }).eq("id", id);
+  if (error) throw new Error(error.message);
+  if (to === "awaiting_approval") later(async () => notifyUsers(await leadIds(), { title: "Content waiting for approval", body: snip(`${who(me)}: ${p.title || p.caption || p.kind}`), url: `/studio/${id}` }, me.id));
+  revalidatePath(`/studio/${id}`); revalidatePath("/studio"); revalidatePath("/approvals");
+});
+
+export const deletePostAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const { data: p } = await sb.from("social_posts").select("status").eq("id", id).single();
+  if (!p) throw new Error("Post not found");
+  if (["approved", "scheduled", "posted"].includes(p.status) && !isLeadRole(me.role)) throw new Error("Only a manager or admin can delete approved content");
+  const { data: media } = await sb.from("post_media").select("storage_path").eq("post_id", id);
+  const { error } = await sb.from("social_posts").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  if (media?.length) { try { await supabaseAdmin().storage.from("documents").remove(media.map((m) => m.storage_path)); } catch { /* files can be cleaned up later */ } }
+  revalidatePath("/studio");
+  redirect("/studio");
+});
+
+export const addPostCommentAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const post_id = str(form, "post_id");
+  const body = str(form, "body").slice(0, 2000);
+  if (!body) return;
+  const { data: p } = await sb.from("social_posts").select("created_by,title,caption").eq("id", post_id).single();
+  const { error } = await sb.from("post_comments").insert({ post_id, author_id: me.id, body });
+  if (error) throw new Error(error.message);
+  if (p?.created_by) later(() => notifyUsers([p.created_by], { title: `${who(me)} commented on your content`, body: snip(body), url: `/studio/${post_id}` }, me.id));
+  revalidatePath(`/studio/${post_id}`);
+});
+
+export async function preparePostMediaAction(form: FormData): Promise<{ path?: string; token?: string; error?: string }> {
+  try {
+    const me = await requireStaff();
+    requireSocial(me);
+    const post_id = str(form, "post_id");
+    const file_name = str(form, "file_name");
+    if (!post_id || !file_name) return { error: "Choose a file first" };
+    const sb = await supabaseServer();
+    const { data: p } = await sb.from("social_posts").select("id").eq("id", post_id).single();
+    if (!p) return { error: "Post not found" };
+    const path = `posts/${post_id}/${randomUUID()}-${safeName(file_name)}`;
+    const { data, error } = await supabaseAdmin().storage.from("documents").createSignedUploadUrl(path);
+    if (error || !data) return { error: "Storage isn't ready yet. Check the Supabase secret key is set in Vercel." };
+    return { path, token: data.token };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not start the upload" };
+  }
+}
+
+export async function registerPostMediaAction(form: FormData): Promise<{ error?: string }> {
+  try {
+    const me = await requireStaff();
+    requireSocial(me);
+    const sb = await supabaseServer();
+    const post_id = str(form, "post_id");
+    const path = str(form, "path");
+    const mime = str(form, "mime_type");
+    if (!path.startsWith(`posts/${post_id}/`) || path.includes("..")) return { error: "Invalid file location" };
+    if (!MEDIA_TYPES.includes(mime)) return { error: "Only images (PNG, JPG, WebP, GIF) and videos (MP4, MOV) can be added" };
+    const { count } = await sb.from("post_media").select("id", { count: "exact", head: true }).eq("post_id", post_id);
+    const { error } = await sb.from("post_media").insert({ post_id, storage_path: path, file_name: str(form, "file_name"), mime_type: mime, size_bytes: Number(str(form, "size")) || null, sort_order: (count ?? 0) + 1, created_by: me.id });
+    if (error) return { error: error.message };
+    revalidatePath(`/studio/${post_id}`); revalidatePath("/studio");
+    return {};
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not save the file" };
+  }
+}
+
+export const deletePostMediaAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  requireSocial(me);
+  const sb = await supabaseServer();
+  const { data: m } = await sb.from("post_media").select("storage_path,post_id").eq("id", str(form, "id")).single();
+  if (!m) throw new Error("File not found");
+  const { error } = await sb.from("post_media").delete().eq("id", str(form, "id"));
+  if (error) throw new Error(error.message);
+  try { await supabaseAdmin().storage.from("documents").remove([m.storage_path]); } catch { /* ignore */ }
+  revalidatePath(`/studio/${m.post_id}`); revalidatePath("/studio");
 });

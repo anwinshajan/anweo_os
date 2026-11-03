@@ -1,6 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-server";
+import { adminIds, clientUserIds, notifyUsers } from "@/lib/notify";
+import { addDays, isoDay } from "@/lib/payments";
+import { formatMoney } from "@/lib/currency";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -23,5 +26,24 @@ export async function GET(req: Request) {
     console.error("billing job failed:", error.message);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, invoicesCreated: data });
+
+  // Reminders: two days before an invoice is due, and the day after it was due. Each fires on exactly one day, so nobody is nagged twice.
+  let reminders = 0;
+  try {
+    const admin = supabaseAdmin();
+    const today = isoDay();
+    const soon = addDays(today, 2), yesterday = addDays(today, -1);
+    const { data: open } = await admin.from("invoices").select("client_id,period_label,amount,currency,due_date,clients(business_name)").in("status", ["due", "overdue"]).in("due_date", [soon, yesterday]);
+    for (const inv of (open ?? []) as any[]) {
+      const money = formatMoney(inv.amount, inv.currency);
+      if (inv.due_date === soon) {
+        await notifyUsers(await clientUserIds(inv.client_id), { title: "Invoice due in 2 days", body: `${inv.period_label} · ${money}`, url: "/" });
+      } else {
+        await notifyUsers(await clientUserIds(inv.client_id), { title: "Invoice overdue", body: `${inv.period_label} · ${money}`, url: "/" });
+        await notifyUsers(await adminIds(), { title: "Invoice overdue", body: `${inv.clients?.business_name ?? "Client"} · ${inv.period_label} · ${money}`, url: "/finance" });
+      }
+      reminders++;
+    }
+  } catch (e) { console.error("reminders failed", e); }
+  return NextResponse.json({ ok: true, invoicesCreated: data, reminders });
 }

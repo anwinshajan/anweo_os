@@ -48,7 +48,7 @@ Clients and staff are in different countries, so money is handled per person and
 Everyone can see their own pay on **My pay**. Nobody except the admin can see anyone else's.
 
 ## Setup
-1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0009. Run 0003 on its own (it adds new role names).
+1. Create a Supabase project and run the SQL files in `supabase/migrations/` **in order**: 0001 to 0011. Run 0003 on its own (it adds new role names).
 2. Supabase → Authentication → Sign In / Providers: enable Email, and turn **off** "Allow new users to sign up".
 3. Copy `.env.example` to `.env.local` and fill it in (see below).
 4. Create your own login in Supabase (Authentication → Users → Add user, tick auto-confirm), then run once in the SQL editor:
@@ -66,6 +66,7 @@ update public.profiles set role = 'admin', status = 'active', full_name = 'Your 
 | `AI_BASE_URL` | Your AI router's OpenAI-compatible base URL (the app calls `<base>/chat/completions`) | For Anweo AI |
 | `AI_API_KEY` | Your router API key | For Anweo AI |
 | `AI_MODEL` | The model ID to use | For Anweo AI |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Push notifications (generate with `npx web-push generate-vapid-keys`) | For push |
 | `ANTHROPIC_API_KEY` | Optional alternative: Anthropic directly, if the three above are not set | No |
 | `CRON_SECRET` | Lets only Vercel's daily job run billing. Any long random string | **Yes** |
 
@@ -84,7 +85,7 @@ Push to GitHub and import into Vercel. Add the variables above under Settings �
 - Approving a post cannot be done by anyone below manager, even by calling the API directly.
 - Files are in a private bucket. The server checks the database permission first, then hands out a 60-second link.
 - Anweo AI reads data with the signed-in person's own access, so it can never see more than they can. It is rate limited to 30 questions an hour per person and cannot change anything.
-- 170 database checks, 11 currency, 29 payment-maths and 8 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
+- 198 database checks, 11 currency, 29 payment-maths and 10 invoice checks cover all of this. Run them with `npm test`, and always after changing a migration.
 
 ## Branding
 Colours are in `tailwind.config.ts` (forest `#0E5A44`, lime `#C9F25A`, ink `#141413`, paper `#F4F3EF`).
@@ -106,3 +107,19 @@ Pages show a skeleton immediately while loading, forms lock their buttons while 
 ## Pricing a project
 
 When you create a project (Projects tab) the admin can enter a total price and an advance (none, 30, 50, 70 or 100 percent). The advance is invoiced straight away; the rest is invoiced automatically when the project is marked completed, and the client's payment window and weekly late fee then apply. Monthly services are priced in the Overview tab, where picking a package fills the price in.
+
+## Notifications
+
+Every event is saved in the in-app bell (`/notifications`) and, if the person turned it on, pushed to their device (Web Push: browsers, Android, and iPhone once the app is added to the home screen). Triggers: chat messages, tasks assigned, content waiting for approval / approved / changes requested, new invoices, payments received, invoices due in 2 days and overdue (daily job), documents shared, projects completed. The `notifications` table is the source of truth and `push_subscriptions.kind` already allows `fcm`, so the Android app only needs to register its token and a sender added in `src/lib/notify.ts`.
+
+## Clock in / out
+
+`/clock`: staff clock in and out with a live timer, today/this-week totals and recent shifts. One open shift per person, clock-in times can't be edited or back-dated, and a forgotten clock-out can be corrected with the real finish time. Managers and the admin see the team's hours; only the admin can delete an entry.
+
+## Social studio
+
+`/studio`: the social and creative team (social managers, marketing, designers) plan ideas, draft captions and hashtags, upload photos and videos (private storage), comment on each other's work and send it for review. A manager or the admin approves it (or asks for changes with a note). Clients only see content after it is approved, with its media; editing approved content sends it back for review automatically.
+
+## Invoices
+
+Invoices have a branded header, company seal, signature block and your terms and conditions (edit them under Settings).
