@@ -76,9 +76,9 @@ export async function POST(req: Request) {
   if (!me || me.status !== "active") return NextResponse.json({ error: "Please sign in again." }, { status: 401 });
 
   // Any OpenAI-compatible router (set AI_BASE_URL, AI_API_KEY, AI_MODEL). Anthropic's own API still works if only ANTHROPIC_API_KEY is set.
-  const routerKey = process.env.AI_API_KEY;
-  const routerBase = (process.env.AI_BASE_URL ?? "").replace(/\/+$/, "");
-  const routerModel = process.env.AI_MODEL;
+  const routerKey = process.env.AI_API_KEY?.trim();
+  const routerBase = (process.env.AI_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const routerModel = process.env.AI_MODEL?.trim();
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const useRouter = !!(routerKey && routerBase && routerModel);
   if (!useRouter && !anthropicKey) {
@@ -128,18 +128,20 @@ export async function POST(req: Request) {
         { model: routerModel, messages: merged },
       ];
       let res!: Response;
+      let errText = "";
       for (const body of attempts) {
         res = await fetch(`${routerBase}/chat/completions`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${routerKey}` },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(50_000),
+          signal: AbortSignal.timeout(20_000),
         });
-        if (res.status !== 400) break;
-        console.error("ai router 400, retrying simpler", (await res.text()).slice(0, 200));
+        if (res.ok || res.status !== 400) break;
+        errText = (await res.text()).slice(0, 300);
+        console.error("ai router 400, retrying simpler", errText);
       }
       if (!res.ok) {
-        console.error("ai router error", res.status, (await res.text()).slice(0, 300));
+        console.error("ai router error", res.status, errText || (await res.text()).slice(0, 300));
         return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
       }
       const data = await res.json();
@@ -167,4 +169,34 @@ export async function POST(req: Request) {
 
   await sb.from("ai_messages").insert({ role: "assistant", content: reply.slice(0, 8000) });
   return NextResponse.json({ reply });
+}
+
+
+// Admin-only check: open /api/ai?test=1 in the browser while signed in to see exactly what the AI router replies.
+export async function GET(req: Request) {
+  const me = await getMe();
+  if (!me || me.status !== "active" || !isAdminRole(me.role)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const key = process.env.AI_API_KEY?.trim();
+  const base = (process.env.AI_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const model = process.env.AI_MODEL?.trim();
+  const info = { base, model, keySet: !!key, keyStart: key ? key.slice(0, 7) : null };
+  if (!key || !base || !model) return NextResponse.json({ ok: false, info, problem: "A variable is missing" });
+  const out: Record<string, unknown> = { info };
+  for (const [name, body] of Object.entries({
+    plain: { model, messages: [{ role: "user", content: "Say hi in three words." }] },
+    withSystem: { model, messages: [{ role: "system", content: "Be brief." }, { role: "user", content: "Say hi in three words." }] },
+    withMaxTokens: { model, max_tokens: 50, messages: [{ role: "user", content: "Say hi in three words." }] },
+  })) {
+    try {
+      const r = await fetch(`${base}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
+      out[name] = { status: r.status, body: (await r.text()).slice(0, 400) };
+    } catch (e) { out[name] = { error: String(e).slice(0, 200) }; }
+  }
+  try {
+    const r = await fetch(`${base}/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
+    const t = await r.text();
+    out.models = { status: r.status, body: t.slice(0, 600) };
+  } catch (e) { out.models = { error: String(e).slice(0, 200) }; }
+  void req;
+  return NextResponse.json(out);
 }

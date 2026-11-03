@@ -262,7 +262,9 @@ export const setWorkStatusAction = safe(async (form: FormData) => {
   const id = str(form, "id");
   const client_id = str(form, "client_id");
   if (!["todo", "in_progress", "review", "done"].includes(status)) return;
-  const { data: w, error } = await sb.from("work_items").update({ status }).eq("id", id).select("title,visible_to_client,client_id").single();
+  const patch: { status: string; assignee?: string | null } = { status };
+  if (form.has("assignee")) patch.assignee = str(form, "assignee") || null;
+  const { data: w, error } = await sb.from("work_items").update(patch).eq("id", id).select("title,visible_to_client,client_id").single();
   if (error || !w) throw new Error(error?.message ?? "Could not change the task status");
   if (w && status === "done") {
     await logEvent(sb, me.id, w.client_id, "work_done", `Completed: ${w.title}`, w.visible_to_client);

@@ -206,6 +206,7 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
               <div className="min-w-0"><p className="truncate">{w.title}{!w.visible_to_client && <span className="ml-2 font-mono text-[10px] uppercase text-mute">internal</span>}</p>
                 <p className="font-mono text-[11px] text-mute">{w.assignee ? `→ ${who.get(w.assignee) ?? "someone"}` : "Unassigned"}{w.due_date ? ` · due ${fmtDate(w.due_date)}` : ""}</p></div>
               <span className="flex shrink-0 items-center gap-2">
+                <select key={w.assignee ?? "none"} name="assignee" defaultValue={w.assignee ?? ""} className="input !w-auto max-w-[9rem] !py-1.5 !text-xs" aria-label="Assigned to"><option value="">Unassigned</option>{(staff ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}</select>
                 <select key={w.status} name="status" defaultValue={w.status} className="input !w-auto !py-1.5 !text-xs">{["todo", "in_progress", "review", "done"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
                 <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
               </span>
