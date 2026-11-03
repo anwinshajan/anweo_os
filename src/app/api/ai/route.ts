@@ -120,12 +120,24 @@ export async function POST(req: Request) {
   const turns = [...history.map((h) => ({ role: h.role, content: h.content })), { role: "user", content: message }];
   try {
     if (useRouter) {
-      const res = await fetch(`${routerBase}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${routerKey}` },
-        body: JSON.stringify({ model: routerModel, max_tokens: 700, messages: [{ role: "system", content: system }, ...turns] }),
-        signal: AbortSignal.timeout(50_000),
-      });
+      // Routers differ in what they accept, so try the fullest request first and fall back to simpler ones.
+      const merged = [{ role: "user", content: `${system}\n\n---\n\n${turns.map((t) => `${t.role}: ${t.content}`).join("\n")}` }];
+      const attempts: Record<string, unknown>[] = [
+        { model: routerModel, max_tokens: 700, messages: [{ role: "system", content: system }, ...turns] },
+        { model: routerModel, messages: [{ role: "system", content: system }, ...turns] },
+        { model: routerModel, messages: merged },
+      ];
+      let res!: Response;
+      for (const body of attempts) {
+        res = await fetch(`${routerBase}/chat/completions`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${routerKey}` },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(50_000),
+        });
+        if (res.status !== 400) break;
+        console.error("ai router 400, retrying simpler", (await res.text()).slice(0, 200));
+      }
       if (!res.ok) {
         console.error("ai router error", res.status, (await res.text()).slice(0, 300));
         return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
