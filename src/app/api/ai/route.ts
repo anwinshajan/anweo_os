@@ -122,10 +122,14 @@ export async function POST(req: Request) {
     if (useRouter) {
       // Routers differ in what they accept, so try the fullest request first and fall back to simpler ones.
       const merged = [{ role: "user", content: `${system}\n\n---\n\n${turns.map((t) => `${t.role}: ${t.content}`).join("\n")}` }];
+      const asParts = [{ role: "user", content: [{ type: "text", text: merged[0].content }] }];
       const attempts: Record<string, unknown>[] = [
         { model: routerModel, max_tokens: 700, messages: [{ role: "system", content: system }, ...turns] },
         { model: routerModel, messages: [{ role: "system", content: system }, ...turns] },
         { model: routerModel, messages: merged },
+        { model: routerModel, messages: asParts },
+        { model: routerModel, max_completion_tokens: 700, messages: merged },
+        { model: routerModel, stream: true, messages: merged },
       ];
       let res!: Response;
       let errText = "";
@@ -163,9 +167,22 @@ export async function POST(req: Request) {
           return NextResponse.json({ error: "Anweo AI couldn't answer just now. Please try again in a moment." }, { status: 502 });
         }
       }
-      const data = await res.json();
-      const c = data.choices?.[0]?.message?.content;
-      reply = (typeof c === "string" ? c : Array.isArray(c) ? c.map((x: { text?: string }) => x.text ?? "").join("") : "").trim();
+      const ctype = res.headers.get("content-type") ?? "";
+      if (ctype.includes("text/event-stream")) {
+        // Some models only answer as a stream: read it and join the pieces.
+        const raw = await res.text();
+        for (const line of raw.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try { const j = JSON.parse(payload); const t = j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.message?.content; if (typeof t === "string") reply += t; } catch { /* skip */ }
+        }
+        reply = reply.trim();
+      } else {
+        const data = await res.json();
+        const c = data.choices?.[0]?.message?.content;
+        reply = (typeof c === "string" ? c : Array.isArray(c) ? c.map((x: { text?: string }) => x.text ?? "").join("") : "").trim();
+      }
     } else {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
