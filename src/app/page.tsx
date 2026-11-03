@@ -148,8 +148,31 @@ async function ClientPortal({ me }: { me: Me }) {
   const hasOwed = Object.keys(owed).length > 0;
   const toSign = (docs ?? []).filter((d) => d.kind === "contract" && d.status === "sent");
 
+  const payable = (invoices ?? [])
+    .filter((i) => i.status === "due" || i.status === "overdue")
+    .map((i) => ({ ...i, dueOn: effectiveDueDate(i, terms) }))
+    .sort((x, y) => (x.dueOn < y.dueOn ? -1 : 1));
+  const firstPayable = payable[0];
+
   return (
     <div className="space-y-5">
+      {payable.length > 0 && (
+        <section className="card !border-lime !bg-lime-soft !p-4">
+          <p className="tag !text-forest">[ Payment due ]</p>
+          <div className="mt-2 space-y-2">
+            {payable.slice(0, 3).map((i) => {
+              const late = isOverdue(i.dueOn, todayIso);
+              return (
+                <div key={i.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  <div className="min-w-0"><p className="truncate font-semibold">{i.period_label}</p><p className={`font-mono text-[11px] ${late ? "font-semibold text-red-700" : "text-forest/70"}`}>{late ? "Overdue · was due " : "Due "}{fmtDate(i.dueOn)}</p></div>
+                  <div className="flex items-center gap-3"><span className="text-lg font-bold">{money(i.amount, i.currency)}</span><Link href={`/invoices/${i.id}/pay`} className="btn-primary !py-2.5">Pay now</Link></div>
+                </div>
+              );
+            })}
+            {payable.length > 3 && <p className="text-xs text-forest/80">+ {payable.length - 3} more in Billing history below.</p>}
+          </div>
+        </section>
+      )}
       <section className="card-green relative overflow-hidden !p-6 sm:!p-8">
         <Corner className="absolute -right-3 -top-3 z-0 h-20 w-20 rotate-90 text-forest-deep sm:h-40 sm:w-40" />
         <div className="relative z-10">
@@ -161,7 +184,8 @@ async function ClientPortal({ me }: { me: Me }) {
             {hasOwed && <div><p className="tag !text-lime">Payment due</p><Totals t={owed} className="text-2xl font-bold leading-snug text-lime" /></div>}
           </div>
           <div className="mt-6 flex flex-wrap gap-2">
-            <Link href="/chat" className="btn-lime">Chat with the team</Link>
+            {firstPayable && <Link href={`/invoices/${firstPayable.id}/pay`} className="btn-lime">Pay now</Link>}
+            <Link href="/chat" className={firstPayable ? "btn !border !border-paper/30 !text-paper hover:!bg-paper/10" : "btn-lime"}>Chat with the team</Link>
             <Link href="/chat/ai" className="btn !border !border-paper/30 !text-paper hover:!bg-paper/10">Ask Anweo AI</Link>
           </div>
         </div>
