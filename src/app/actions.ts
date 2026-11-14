@@ -262,6 +262,7 @@ export const addWorkAction = safe(async (form: FormData) => {
     service_id: str(form, "service_id") || null,
     assignee: str(form, "assignee") || null,
     due_date: str(form, "due_date") || null,
+    details: clip(form, "details", 4000),
     visible_to_client: form.get("visible") === "on",
   });
   if (error) throw new Error(error.message);
@@ -270,6 +271,35 @@ export const addWorkAction = safe(async (form: FormData) => {
   if (assignee) later(() => notifyUsers([assignee], { title: "New task for you", body: snip(title), url: "/tasks" }, me.id));
   revalidatePath(`/clients/${client_id}`);
   revalidatePath("/tasks");
+});
+
+// The brief for a task (what to make, sizes, tone, deadline notes). Managers and admin write it; the assignee reads it.
+export const updateWorkDetailsAction = safe(async (form: FormData) => {
+  await requireLead();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  if (!id) return;
+  const { error } = await sb.from("work_items").update({ details: clip(form, "details", 4000) }).eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/tasks/${id}`);
+});
+
+// A comment on a task. The assignee's comments go to the managers; a manager's comment goes to the assignee.
+export const addWorkCommentAction = safe(async (form: FormData) => {
+  const me = await requireStaff();
+  const sb = await supabaseServer();
+  const id = str(form, "id");
+  const body = str(form, "body");
+  if (!id || !body) return;
+  const { data: w } = await sb.from("work_items").select("id,title,assignee").eq("id", id).single();
+  if (!w) throw new Error("Task not found");
+  const { error } = await sb.from("work_comments").insert({ work_id: id, author_id: me.id, body: body.slice(0, 2000) });
+  if (error) throw new Error(error.message);
+  later(async () => {
+    const to = isLeadRole(me.role) ? (w.assignee ? [w.assignee as string] : []) : await leadIds();
+    await notifyUsers(to, { title: `${who(me)} on “${snip(w.title, 40)}”`, body: snip(body), url: `/tasks/${id}` }, me.id);
+  });
+  revalidatePath(`/tasks/${id}`);
 });
 
 export const setWorkStatusAction = safe(async (form: FormData) => {

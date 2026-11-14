@@ -48,7 +48,7 @@ export default async function Tasks() {
     <Form action={setWorkStatusAction} className="row flex-wrap">
       <input type="hidden" name="id" value={t.id} /><input type="hidden" name="client_id" value={t.client_id} />
       <div className="min-w-0">
-        <p className="truncate font-medium">{t.title}</p>
+        <Link href={`/tasks/${t.id}`} className="block truncate font-medium hover:text-forest hover:underline">{t.title}</Link>
         <p className="font-mono text-[11px] text-mute"><Link href={`/clients/${t.client_id}?tab=work`} className="hover:text-forest hover:underline">{cn.get(t.client_id) ?? t.clients?.business_name}</Link>{t.due_date ? ` · due ${fmtDate(t.due_date)}` : ""}</p>
       </div>
       <span className="flex shrink-0 items-center gap-2">

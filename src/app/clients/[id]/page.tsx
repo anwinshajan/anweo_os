@@ -241,7 +241,7 @@ async function WorkAndContent({ id, meCanSocial, lead }: { id: string; meCanSoci
           {(work ?? []).map((w: any) => (
             <Form key={w.id} action={setWorkStatusAction} className="row flex-wrap">
               <input type="hidden" name="id" value={w.id} /><input type="hidden" name="client_id" value={id} />
-              <div className="min-w-0"><p className="truncate">{w.title}{!w.visible_to_client && <span className="ml-2 font-mono text-[10px] uppercase text-mute">internal</span>}</p>
+              <div className="min-w-0"><p className="truncate"><Link href={`/tasks/${w.id}`} className="hover:text-forest hover:underline">{w.title}</Link>{!w.visible_to_client && <span className="ml-2 font-mono text-[10px] uppercase text-mute">internal</span>}</p>
                 <p className="font-mono text-[11px] text-mute">{w.assignee ? `→ ${who.get(w.assignee) ?? "someone"}` : "Unassigned"}{w.due_date ? ` · due ${fmtDate(w.due_date)}` : ""}</p></div>
               <span className="flex shrink-0 items-center gap-2">
                 {lead && <select key={w.assignee ?? "none"} name="assignee" defaultValue={w.assignee ?? ""} className="input !w-auto max-w-[9rem] !py-1.5 !text-xs" aria-label="Assigned to"><option value="">Unassigned</option>{(staff ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}</select>}
@@ -257,6 +257,7 @@ async function WorkAndContent({ id, meCanSocial, lead }: { id: string; meCanSoci
           <div><label className="label">Assign to</label>
             <select name="assignee" className="input"><option value="">Nobody yet</option>{(staff ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.full_name || s.email}</option>)}</select></div>
           <div><label className="label">Due</label><input name="due_date" type="date" className="input" /></div>
+          <div className="sm:col-span-4"><label className="label">Brief (what to make, sizes, tone, links)</label><textarea name="details" rows={3} className="input" /></div>
           <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" name="visible" defaultChecked className="h-4 w-4 accent-forest" /> Show to client</label>
           <div><button className="btn-primary w-full">Add task</button></div>
         </Form>}

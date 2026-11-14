@@ -26,6 +26,7 @@ const sql18 = mig("0018_sales_pipeline.sql");
 const sql19 = mig("0019_prospect_touch.sql");
 const sql20 = mig("0020_assignment_access.sql");
 const sql21 = mig("0021_chat_unread.sql");
+const sql22 = mig("0022_work_comments.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -57,6 +58,7 @@ await db.exec(sql18);
 await db.exec(sql19);
 await db.exec(sql20);
 await db.exec(sql21);
+await db.exec(sql22);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -995,6 +997,26 @@ await as(dev, async () => {
   ok("nobody can mark conversations read for someone else", b);
   ok("an unassigned developer has no client-thread unread counts", !(await q(`select thread from unread_counts()`)).rows.some(r => r.thread.startsWith("client:")));
 });
+
+// =================== PHASE 12: task comments ===================
+let wk;
+await as(sm, async () => { wk = (await q(`select id from work_items where assignee='${sm}' limit 1`)).rows[0].id; });
+await as(sm, async () => {
+  await q(`insert into work_comments(work_id, author_id, body) values ('${wk}', '${sm}', 'Which size for the poster?')`);
+  ok("the assignee can comment on their task", (await q(`select id from work_comments where work_id='${wk}'`)).rows.length === 1);
+  let b = false; try { await q(`insert into work_comments(work_id, author_id, body) values ('${wk}', '${mgr}', 'as someone else')`); } catch { b = true; }
+  ok("nobody can comment as someone else", b);
+});
+await as(mgr, async () => {
+  await q(`insert into work_comments(work_id, author_id, body) values ('${wk}', '${mgr}', 'A3 portrait please')`);
+  ok("a manager sees and can reply to task comments", (await q(`select id from work_comments where work_id='${wk}'`)).rows.length === 2);
+});
+await as(dev, async () => {
+  ok("an unassigned staff member cannot read a task's comments", (await q(`select id from work_comments where work_id='${wk}'`)).rows.length === 0);
+  let b = false; try { await q(`insert into work_comments(work_id, author_id, body) values ('${wk}', '${dev}', 'sneaking in')`); } catch { b = true; }
+  ok("an unassigned staff member cannot comment on it", b);
+});
+await as(cA, async () => { ok("clients never see task comments", (await q(`select id from work_comments`)).rows.length === 0); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
