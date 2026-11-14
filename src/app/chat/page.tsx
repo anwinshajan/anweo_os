@@ -2,9 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import Shell, { Empty, PageHead, fmtDate } from "@/components/Shell";
 import { Icon } from "@/components/NavLinks";
+import { unreadByThread } from "@/lib/chat";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
+
+function UnreadPill({ n }: { n: number }) {
+  return <span className="shrink-0 rounded-full bg-red-600 px-2 text-[11px] font-bold leading-5 text-white">{n > 99 ? "99+" : n} new</span>;
+}
 
 export default async function ChatIndex() {
   const me = await getMe();
@@ -32,6 +37,7 @@ export default async function ChatIndex() {
     );
   }
 
+  const unread = await unreadByThread();
   const sb = await supabaseServer();
   const [{ data: clients }, { data: last }, { data: team }, { data: dms }] = await Promise.all([
     sb.rpc("visible_clients"),
@@ -51,7 +57,7 @@ export default async function ChatIndex() {
       <PageHead tag="Chat" title="Messages" sub="Talk to your team, to clients, or ask Anweo AI." />
       <div className="mb-6 grid gap-3 sm:grid-cols-2">
         <Link href="/chat/team" className="card block !p-4 transition hover:-translate-y-0.5 hover:border-forest/40">
-          <p className="tag">Internal</p><p className="mt-1 text-lg font-bold">Team channel</p><p className="text-sm text-mute">Staff only. Clients can't see this.</p>
+          <p className="tag">Internal</p><p className="mt-1 flex items-center gap-2 text-lg font-bold">Team channel{!!unread.get("team") && <UnreadPill n={unread.get("team")!} />}</p><p className="text-sm text-mute">Staff only. Clients can't see this.</p>
         </Link>
         <Link href="/chat/ai" className="card-green block !p-4 transition hover:-translate-y-0.5">
           <p className="tag !text-lime">Assistant</p><p className="mt-1 text-lg font-bold">Anweo AI</p><p className="text-sm text-paper/70">Ask about clients, packages and how things work.</p>
@@ -68,8 +74,9 @@ export default async function ChatIndex() {
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-lime text-sm font-bold text-ink">{name[0]?.toUpperCase()}</span>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold">{name} <span className="font-mono text-[10px] font-normal uppercase text-mute">{p.role}</span></p>
-                <p className="truncate text-xs text-mute">{m ? m.body : "Start a conversation"}</p>
+                <p className={`truncate text-xs ${unread.get(`dm:${p.id}`) ? "font-semibold text-ink" : "text-mute"}`}>{m ? m.body : "Start a conversation"}</p>
               </div>
+              {!!unread.get(`dm:${p.id}`) && <UnreadPill n={unread.get(`dm:${p.id}`)!} />}
             </Link>
           );
         })}
@@ -84,8 +91,9 @@ export default async function ChatIndex() {
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-forest text-base font-bold text-lime">{c.business_name[0]?.toUpperCase()}</span>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold">{c.business_name}</p>
-                <p className="truncate text-xs text-mute">{m ? m.body : "No messages yet"}</p>
+                <p className={`truncate text-xs ${unread.get(`client:${c.id}`) ? "font-semibold text-ink" : "text-mute"}`}>{m ? m.body : "No messages yet"}</p>
               </div>
+              {!!unread.get(`client:${c.id}`) && <UnreadPill n={unread.get(`client:${c.id}`)!} />}
               {m && <span className="shrink-0 font-mono text-[10px] text-mute">{fmtDate(m.created_at)}</span>}
             </Link>
           );

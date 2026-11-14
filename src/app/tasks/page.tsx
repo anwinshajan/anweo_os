@@ -23,6 +23,24 @@ export default async function Tasks() {
       ? sb.from("work_items").select("id,client_id,title,status,due_date,clients(business_name)").is("assignee", null).neq("status", "done").order("created_at", { ascending: false }).limit(30)
       : Promise.resolve({ data: [] as any[] }),
   ]);
+  // Managers and admin: who is carrying how much, and who is running late.
+  let workload: { id: string; name: string; role: string; open: number; late: number; review: number }[] = [];
+  if (lead) {
+    const today = new Date().toISOString().slice(0, 10);
+    const [{ data: team }, { data: all }] = await Promise.all([
+      sb.from("profiles").select("id,full_name,email,role").eq("status", "active").neq("role", "client"),
+      sb.from("work_items").select("assignee,status,due_date").neq("status", "done").not("assignee", "is", null),
+    ]);
+    const by = new Map<string, { open: number; late: number; review: number }>();
+    for (const w of (all ?? []) as any[]) {
+      const r = by.get(w.assignee) ?? { open: 0, late: 0, review: 0 };
+      r.open++; if (w.due_date && w.due_date < today) r.late++; if (w.status === "review") r.review++;
+      by.set(w.assignee, r);
+    }
+    workload = ((team ?? []) as any[])
+      .map((p) => ({ id: p.id, name: p.full_name || p.email || "Team member", role: p.role, ...(by.get(p.id) ?? { open: 0, late: 0, review: 0 }) }))
+      .sort((a, b) => b.late - a.late || b.open - a.open);
+  }
   const open = (mine ?? []).filter((t: any) => t.status !== "done");
   const done = (mine ?? []).filter((t: any) => t.status === "done").slice(0, 8);
 
@@ -52,6 +70,23 @@ export default async function Tasks() {
           <p className="tag mb-3">[ Unassigned · {unassigned?.length ?? 0} ]</p>
           <div className="space-y-2">{(unassigned ?? []).length === 0 ? <Empty>Nothing waiting to be assigned.</Empty> : (unassigned ?? []).map((t: any) => <Row key={t.id} t={t} />)}</div>
           <p className="mt-2 text-xs text-mute">Open a client's “Work & content” tab to assign tasks.</p>
+        </section>
+      )}
+      {lead && workload.length > 0 && (
+        <section className="mb-8">
+          <p className="tag mb-3">[ Team workload ]</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {workload.map((w) => (
+              <div key={w.id} className="card flex items-center gap-3 !p-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-lime text-sm font-bold text-ink">{w.name[0]?.toUpperCase()}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold">{w.name} <span className="font-mono text-[10px] font-normal uppercase text-mute">{w.role}</span></p>
+                  <p className="text-xs text-mute">{w.open} open{w.review ? ` · ${w.review} in review` : ""}</p>
+                </div>
+                {w.late > 0 && <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">{w.late} overdue</span>}
+              </div>
+            ))}
+          </div>
         </section>
       )}
       {done.length > 0 && (

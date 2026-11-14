@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import Shell, { PageHead } from "@/components/Shell";
 import ChatBox, { type Msg } from "@/components/ChatBox";
+import { markRead } from "@/lib/chat";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ export default async function DirectChat({ params }: { params: Promise<{ id: str
   const sb = await supabaseServer();
   const { data: other } = await sb.from("profiles").select("id,full_name,email,role,status").eq("id", id).maybeSingle();
   if (!other || other.role === "client") notFound();
+  await markRead(`dm:${id}`);
   const { data } = await sb.rpc("dm_thread", { p_other: id, p_limit: 100 });
   const messages = ((data ?? []) as Msg[]).slice().reverse();
   const name = other.full_name || other.email || "Team member";

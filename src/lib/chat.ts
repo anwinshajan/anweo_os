@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/lib/supabase-server";
+import { getMe, supabaseAdmin, supabaseServer } from "@/lib/supabase-server";
 
 export type Person = { id: string; name: string; role: string };
 
@@ -16,3 +16,21 @@ export async function mentionPeople(me: { id: string; role: string; client_id: s
 }
 
 export const teamPeople = (me: { id: string; role: string; client_id: string | null }) => mentionPeople(me, null);
+
+// Unread badges. Keys: "team", "client:<id>", "dm:<otherUserId>".
+export async function markRead(thread: string) {
+  const me = await getMe();
+  if (!me) return;
+  const sb = await supabaseServer();
+  await sb.from("chat_reads").upsert({ user_id: me.id, thread, last_read_at: new Date().toISOString() }, { onConflict: "user_id,thread" });
+}
+
+export async function unreadByThread(): Promise<Map<string, number>> {
+  try {
+    const sb = await supabaseServer();
+    const { data } = await sb.rpc("unread_counts");
+    return new Map(((data ?? []) as { thread: string; n: number }[]).map((r) => [r.thread, r.n]));
+  } catch {
+    return new Map();
+  }
+}

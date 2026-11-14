@@ -19,8 +19,16 @@ export async function proxy(req: NextRequest) {
     }
   );
   const { data } = await sb.auth.getUser();
-  const isLogin = req.nextUrl.pathname.startsWith("/login");
-  if (!data.user && !isLogin) {
+  const path = req.nextUrl.pathname;
+  const isLogin = path.startsWith("/login");
+  // Password reset pages must work signed out. If the email link lands on the home page with a code, hand it to /reset.
+  if (path === "/" && !data.user && req.nextUrl.searchParams.get("code")) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/reset";
+    return NextResponse.redirect(url);
+  }
+  const isPublic = isLogin || path.startsWith("/forgot") || path.startsWith("/reset");
+  if (!data.user && !isPublic) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

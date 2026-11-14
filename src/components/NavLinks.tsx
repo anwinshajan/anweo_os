@@ -3,7 +3,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 export type IconName = "clients" | "approvals" | "catalogue" | "team" | "chat" | "tasks" | "more" | "home" | "ai" | "account" | "finance" | "pay" | "settings" | "transactions" | "clock" | "studio" | "tickets" | "calendar" | "growth";
-export type NavItem = { href: string; label: string; icon: IconName; more?: boolean };
+export type NavItem = { href: string; label: string; icon: IconName; more?: boolean; badge?: number };
+
+function Dot({ n }: { n?: number }) {
+  if (!n) return null;
+  return <span className="ml-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-bold leading-[18px] text-white" aria-label={`${n} unread`}>{n > 99 ? "99+" : n}</span>;
+}
 
 const icons: Record<IconName, React.ReactNode> = {
   clients: <path d="M4 20v-1a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v1M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm9 9v-1a4 4 0 0 0-3-3.9M16 4.2a3.5 3.5 0 0 1 0 6.6" />,
@@ -50,7 +55,7 @@ export function TopNav({ items }: { items: NavItem[] }) {
             isActive(path, i.href) ? "bg-forest text-paper" : "text-ink/70 hover:bg-forest-soft hover:text-forest"
           }`}
         >
-          {i.label}
+          {i.label}<Dot n={i.badge} />
         </Link>
       ))}
     </nav>
@@ -71,8 +76,9 @@ export function BottomNav({ items }: { items: NavItem[] }) {
           return (
             <li key={i.href}>
               <Link href={i.href} className={`flex min-w-[62px] flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 text-[11px] font-medium ${on ? "text-forest" : "text-mute"}`}>
-                <span className={`flex h-7 w-12 items-center justify-center rounded-full transition ${on ? "bg-lime" : ""}`}>
+                <span className={`relative flex h-7 w-12 items-center justify-center rounded-full transition ${on ? "bg-lime" : ""}`}>
                   <Icon name={i.icon} />
+                  {!!i.badge && <span className="absolute right-1 top-0 min-w-[16px] rounded-full bg-red-600 px-1 text-center text-[9px] font-bold leading-4 text-white">{i.badge > 99 ? "99+" : i.badge}</span>}
                 </span>
                 {i.label}
               </Link>

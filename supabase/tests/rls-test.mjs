@@ -25,6 +25,7 @@ const sql17 = mig("0017_direct_messages_mentions.sql");
 const sql18 = mig("0018_sales_pipeline.sql");
 const sql19 = mig("0019_prospect_touch.sql");
 const sql20 = mig("0020_assignment_access.sql");
+const sql21 = mig("0021_chat_unread.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -55,6 +56,7 @@ await db.exec(sql17);
 await db.exec(sql18);
 await db.exec(sql19);
 await db.exec(sql20);
+await db.exec(sql21);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -976,6 +978,22 @@ await as(sm, async () => {
   ok("staff cannot message a client they are not assigned to", b);
   await q(`insert into messages(client_id,sender_id,body) values (null,'${sm}','team channel hello')`);
   ok("staff can still use the team channel", true);
+});
+
+// =================== PHASE 11: unread chat badges ===================
+await q(`insert into messages(client_id,sender_id,body,created_at) values (null,'${mgr}','unread team ping', now() + interval '1 day')`);
+await as(sm, async () => {
+  const get = async () => Object.fromEntries((await q(`select thread, n from unread_counts()`)).rows.map(r => [r.thread, r.n]));
+  const before = await get();
+  ok("a new team message counts as unread", before.team >= 1);
+  await q(`insert into chat_reads(user_id, thread, last_read_at) values ('${sm}', 'team', now() + interval '2 days') on conflict (user_id, thread) do update set last_read_at = excluded.last_read_at`);
+  ok("opening the conversation clears its unread count", !(await get()).team);
+  ok("your own messages are never unread for you", !Object.keys(await get()).some(t => t === `dm:${sm}`));
+});
+await as(dev, async () => {
+  let b = false; try { await q(`insert into chat_reads(user_id, thread) values ('${sm}', 'team')`); } catch { b = true; }
+  ok("nobody can mark conversations read for someone else", b);
+  ok("an unassigned developer has no client-thread unread counts", !(await q(`select thread from unread_counts()`)).rows.some(r => r.thread.startsWith("client:")));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

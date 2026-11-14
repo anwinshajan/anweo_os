@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import Shell, { PageHead } from "@/components/Shell";
 import ChatBox, { type Msg } from "@/components/ChatBox";
-import { mentionPeople } from "@/lib/chat";
+import { mentionPeople, markRead } from "@/lib/chat";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { isLeadRole } from "@/lib/roles";
 
@@ -23,6 +23,7 @@ export default async function ClientChat({ params }: { params: Promise<{ id: str
     ? (await sb.from("clients").select("business_name").eq("id", id).single()).data
     : ((await sb.rpc("visible_clients")).data as { id: string; business_name: string }[] | null)?.find((c) => c.id === id) ?? null;
   if (!client) notFound();
+  await markRead(`client:${id}`);
   const { data } = await sb.rpc("chat_thread", { p_client: id, p_limit: 100 });
   const messages = ((data ?? []) as Msg[]).slice().reverse();
   const isClient = me.role === "client";

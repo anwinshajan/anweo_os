@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { signOutAction } from "@/app/actions";
 import type { Me } from "@/lib/supabase-server";
+import { unreadByThread } from "@/lib/chat";
 import { roleLabel, isAdminRole, isLeadRole } from "@/lib/roles";
 import { formatMoney } from "@/lib/currency";
 import { Logo } from "./Logo";
@@ -41,9 +42,11 @@ export function navFor(me: Me): NavItem[] {
   ];
 }
 
-export default function Shell({ me, children }: { me: Me; children: React.ReactNode }) {
+export default async function Shell({ me, children }: { me: Me; children: React.ReactNode }) {
   const staff = me.role !== "client";
-  const all = navFor(me);
+  const unread = [...(await unreadByThread()).values()].reduce((a, b) => a + b, 0);
+  const withBadge = (items: NavItem[]) => items.map((i) => (i.href === "/chat" ? { ...i, badge: unread } : i));
+  const all = withBadge(navFor(me));
   const bottom: NavItem[] = staff
     ? [
         { href: "/", label: "Clients", icon: "clients" },
@@ -51,7 +54,7 @@ export default function Shell({ me, children }: { me: Me; children: React.ReactN
         { href: "/chat", label: "Chat", icon: "chat" },
         { href: "/approvals", label: "Approvals", icon: "approvals" },
         { href: "/more", label: "More", icon: "more" },
-      ]
+      ].map((i) => (i.href === "/chat" ? { ...i, badge: unread } : i)) as NavItem[]
     : all;
   const initial = (me.full_name || me.email || "A").trim()[0]?.toUpperCase();
 

@@ -57,5 +57,23 @@ export async function GET(req: Request) {
     for (const p of (dueP ?? []) as any[]) { const o = p.assigned_to ?? p.created_by; if (o) per.set(o, (per.get(o) ?? 0) + 1); }
     for (const [uid, n] of per) { await notifyUsers([uid], { title: `${n} prospect${n === 1 ? "" : "s"} to follow up today`, body: "Open Growth to see who to message", url: "/growth" }); followups++; }
   } catch (e) { console.error("follow-up reminders failed", e); }
-  return NextResponse.json({ ok: true, followups, invoicesCreated: data, reminders, tasksCreated: tasks });
+  // Team: one morning nudge per person for tasks due today or already overdue.
+  let taskNudges = 0;
+  try {
+    const admin = supabaseAdmin();
+    const today = isoDay();
+    const { data: dueW } = await admin.from("work_items").select("assignee,due_date").lte("due_date", today).neq("status", "done").not("assignee", "is", null);
+    const per = new Map<string, { today: number; late: number }>();
+    for (const w of (dueW ?? []) as any[]) {
+      const row = per.get(w.assignee) ?? { today: 0, late: 0 };
+      if (w.due_date === today) row.today++; else row.late++;
+      per.set(w.assignee, row);
+    }
+    for (const [uid, c] of per) {
+      const parts = [c.today ? `${c.today} due today` : "", c.late ? `${c.late} overdue` : ""].filter(Boolean).join(" · ");
+      await notifyUsers([uid], { title: "Tasks need your attention", body: parts, url: "/tasks", priority: c.late > 0 });
+      taskNudges++;
+    }
+  } catch (e) { console.error("task reminders failed", e); }
+  return NextResponse.json({ ok: true, taskNudges, followups, invoicesCreated: data, reminders, tasksCreated: tasks });
 }

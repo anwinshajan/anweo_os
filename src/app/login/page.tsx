@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { Corner, Logo } from "@/components/Logo";
@@ -48,7 +49,7 @@ export default function LoginPage() {
               <input id="email" type="email" required autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div>
-              <label className="label" htmlFor="password">Password</label>
+              <div className="flex items-baseline justify-between"><label className="label" htmlFor="password">Password</label><Link href="/forgot" className="text-xs font-medium text-forest hover:underline">Forgot password?</Link></div>
               <input id="password" type="password" required autoComplete="current-password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             {error && <p role="alert" className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700">{error}</p>}
