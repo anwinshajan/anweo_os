@@ -3,6 +3,7 @@ import Form from "@/components/Form";
 import { redirect } from "next/navigation";
 import Shell, { Empty, PageHead, fmtDate, label } from "@/components/Shell";
 import { setWorkStatusAction } from "@/app/actions";
+import { nameMap, visibleClients } from "@/lib/clients";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { isLeadRole } from "@/lib/roles";
 
@@ -15,6 +16,7 @@ export default async function Tasks() {
   const lead = isLeadRole(me.role);
   const sb = await supabaseServer();
 
+  const cn = nameMap(await visibleClients(sb));
   const [{ data: mine }, { data: unassigned }] = await Promise.all([
     sb.from("work_items").select("id,client_id,title,status,due_date,clients(business_name)").eq("assignee", me.id).order("due_date", { nullsFirst: false }),
     lead
@@ -29,7 +31,7 @@ export default async function Tasks() {
       <input type="hidden" name="id" value={t.id} /><input type="hidden" name="client_id" value={t.client_id} />
       <div className="min-w-0">
         <p className="truncate font-medium">{t.title}</p>
-        <p className="font-mono text-[11px] text-mute"><Link href={`/clients/${t.client_id}?tab=work`} className="hover:text-forest hover:underline">{t.clients?.business_name}</Link>{t.due_date ? ` · due ${fmtDate(t.due_date)}` : ""}</p>
+        <p className="font-mono text-[11px] text-mute"><Link href={`/clients/${t.client_id}?tab=work`} className="hover:text-forest hover:underline">{cn.get(t.client_id) ?? t.clients?.business_name}</Link>{t.due_date ? ` · due ${fmtDate(t.due_date)}` : ""}</p>
       </div>
       <span className="flex shrink-0 items-center gap-2">
         <select key={t.status} name="status" defaultValue={t.status} className="input !w-auto !py-1.5 !text-xs">{["todo", "in_progress", "review", "done"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>

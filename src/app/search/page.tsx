@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import Shell, { Empty, PageHead } from "@/components/Shell";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
+import { nameMap, visibleClients } from "@/lib/clients";
+import { isLeadRole } from "@/lib/roles";
 import { statusLabel, ticketRef } from "@/lib/tickets";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +21,11 @@ export default async function Search({ searchParams }: { searchParams: Promise<{
   const isClient = me.role === "client";
   const sb = await supabaseServer();
   const groups: { name: string; hits: Hit[] }[] = [];
+  const cn = isClient ? new Map<string, string>() : nameMap(await visibleClients(sb));
 
   if (term.length >= 2) {
     const [clients, projects, tickets, tasks, posts, invoices, docs] = await Promise.all([
-      isClient ? { data: [] as any[] } : sb.from("clients").select("id,business_name,contact_name,email").or(`business_name.ilike.${like},contact_name.ilike.${like},email.ilike.${like}`).limit(8),
+      isClient || !isLeadRole(me.role) ? { data: [] as any[] } : sb.from("clients").select("id,business_name,contact_name,email").or(`business_name.ilike.${like},contact_name.ilike.${like},email.ilike.${like}`).limit(8),
       sb.from("projects").select("id,title,client_id,clients(business_name)").ilike("title", like).limit(8),
       sb.from("tickets").select("id,ticket_no,subject,status").ilike("subject", like).limit(8),
       isClient ? { data: [] as any[] } : sb.from("work_items").select("id,title,client_id,clients(business_name)").ilike("title", like).limit(8),
@@ -32,9 +35,9 @@ export default async function Search({ searchParams }: { searchParams: Promise<{
     ]);
     const add = (name: string, hits: Hit[]) => hits.length && groups.push({ name, hits });
     add("Clients", (clients.data ?? []).map((c: any) => ({ href: `/clients/${c.id}`, title: c.business_name, sub: [c.contact_name, c.email].filter(Boolean).join(" · ") })));
-    add("Projects", (projects.data ?? []).map((p: any) => ({ href: isClient ? "/" : `/clients/${p.client_id}?tab=projects`, title: p.title, sub: p.clients?.business_name })));
+    add("Projects", (projects.data ?? []).map((p: any) => ({ href: isClient ? "/" : `/clients/${p.client_id}?tab=projects`, title: p.title, sub: cn.get(p.client_id) ?? p.clients?.business_name })));
     add("Tickets", (tickets.data ?? []).map((t: any) => ({ href: `/tickets/${t.id}`, title: `${ticketRef(t.ticket_no)} ${t.subject}`, sub: statusLabel(t.status) })));
-    add("Tasks", (tasks.data ?? []).map((w: any) => ({ href: `/clients/${w.client_id}?tab=work`, title: w.title, sub: w.clients?.business_name })));
+    add("Tasks", (tasks.data ?? []).map((w: any) => ({ href: `/clients/${w.client_id}?tab=work`, title: w.title, sub: cn.get(w.client_id) ?? w.clients?.business_name })));
     add("Content", (posts.data ?? []).map((p: any) => ({ href: `/studio/${p.id}`, title: p.title || (p.caption ?? "").slice(0, 70) || "Untitled", sub: p.clients?.business_name })));
     add("Invoices", (invoices.data ?? []).map((i: any) => ({ href: `/invoices/${i.id}`, title: i.period_label, sub: i.invoice_no ? `ANW-${String(i.invoice_no).padStart(4, "0")}` : undefined })));
     add("Documents", (docs.data ?? []).map((d: any) => ({ href: `/api/documents/${d.id}`, title: d.title })));

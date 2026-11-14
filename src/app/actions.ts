@@ -515,18 +515,46 @@ export async function sendMessageAction(form: FormData): Promise<{ error?: strin
       const mentioned = new Set(mentions);
       const url = recipient ? `/chat/dm/${me.id}` : !target ? "/chat/team" : `/chat/c/${target}`;
       // The mentioned person gets a priority notification, wherever they are allowed to read.
-      if (mentioned.size) {
+      const pendingForClient = !!target && !recipient && me.role !== "client" && !isLeadRole(me.role);
+      if (mentioned.size && !pendingForClient) {
         await notifyUsers([...mentioned], { title: `${who(me)} mentioned you`, body: snip(body), url, priority: true }, me.id);
       }
       const skip = (ids: string[]) => ids.filter((i) => !mentioned.has(i));
       if (recipient) await notifyUsers([recipient], { title: `${who(me)}`, body: snip(body), url: `/chat/dm/${me.id}` }, me.id);
       else if (!target) await notifyUsers(skip(await staffIds()), { title: `${who(me)} in Team chat`, body: snip(body), url: "/chat/team" }, me.id);
       else if (me.role === "client") await notifyUsers(skip(await leadIds()), { title: `${who(me)} (client)`, body: snip(body), url: `/chat/c/${target}` }, me.id);
+      else if (!isLeadRole(me.role)) await notifyUsers(skip(await leadIds()), { title: `${who(me)} drafted a client message`, body: `Needs your approval: ${snip(body)}`, url: `/chat/c/${target}`, priority: true }, me.id);
       else await notifyUsers(skip(await clientUserIds(target)), { title: "Message from the Anweo team", body: snip(body), url: `/chat/c/${target}` }, me.id);
     });
     return {};
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Message not sent" };
+  }
+}
+
+// Managers and admin review what team members wrote to a client. Approved messages reach the client; rejected ones disappear.
+export async function reviewMessageAction(form: FormData): Promise<{ error?: string }> {
+  try {
+    const me = await requireLead();
+    const id = str(form, "id");
+    const decision = str(form, "decision");
+    if (!id || !["approve", "reject"].includes(decision)) return { error: "Invalid request" };
+    const sb = await supabaseServer();
+    const { data: msg } = await sb.from("messages").select("id,client_id,body,approved").eq("id", id).single();
+    if (!msg || msg.approved || !msg.client_id) return { error: "Message not found or already reviewed" };
+    if (decision === "approve") {
+      const { error } = await sb.from("messages").update({ approved: true }).eq("id", id);
+      if (error) return { error: error.message };
+      const cid = msg.client_id as string;
+      later(async () => notifyUsers(await clientUserIds(cid), { title: "Message from the Anweo team", body: snip(msg.body), url: `/chat/c/${cid}` }, me.id));
+    } else {
+      const { error } = await sb.from("messages").delete().eq("id", id);
+      if (error) return { error: error.message };
+    }
+    revalidatePath(`/chat/c/${msg.client_id}`);
+    return {};
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not review message" };
   }
 }
 
@@ -1506,10 +1534,14 @@ export const saveMetricsAction = safe(async (form: FormData) => {
   const month = str(form, "month");
   if (!client_id || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Pick the month");
   const spend = str(form, "ad_spend");
+  // Team members never see or change ad spend (money); only the form for managers/admin includes the field.
+  const money: Record<string, number | string | null> = form.has("ad_spend")
+    ? { ad_spend: spend === "" ? null : Math.max(0, Number(spend)), ad_currency: spend === "" ? null : cur(form, "ad_currency") }
+    : {};
   const row = {
     client_id, period: `${month}-01`, platform: str(form, "platform") || "all",
     followers: intOrNull(form, "followers"), reach: intOrNull(form, "reach"), impressions: intOrNull(form, "impressions"), engagement: intOrNull(form, "engagement"),
-    ad_spend: spend === "" ? null : Math.max(0, Number(spend)), ad_currency: spend === "" ? null : cur(form, "ad_currency"),
+    ...money,
     notes: clip(form, "notes", 800), created_by: me.id,
   };
   const { error } = await sb.from("client_metrics").upsert(row, { onConflict: "client_id,period,platform" });

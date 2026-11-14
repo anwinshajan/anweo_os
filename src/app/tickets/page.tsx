@@ -4,6 +4,8 @@ import Form from "@/components/Form";
 import LocalTime from "@/components/LocalTime";
 import Shell, { Empty, PageHead } from "@/components/Shell";
 import { createTicketAction } from "@/app/actions";
+import { nameMap, visibleClients } from "@/lib/clients";
+import { isLeadRole } from "@/lib/roles";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { CATEGORIES, STATUSES, categoryLabel, isOpenStatus, priorityTone, statusLabel, statusTone, ticketRef } from "@/lib/tickets";
 
@@ -17,9 +19,11 @@ export default async function Tickets({ searchParams }: { searchParams: Promise<
   const isClient = me.role === "client";
   const sb = await supabaseServer();
 
-  const [{ data: all }, { data: clients }, { data: projects }] = await Promise.all([
+  const clientList = isClient ? [] : await visibleClients(sb);
+  const cn = nameMap(clientList);
+  const clients = clientList.filter((c) => c.status === "active");
+  const [{ data: all }, { data: projects }] = await Promise.all([
     sb.from("tickets").select("id,ticket_no,subject,category,priority,status,assigned_to,client_id,updated_at,clients(business_name)").order("updated_at", { ascending: false }).limit(300),
-    isClient ? Promise.resolve({ data: [] as { id: string; business_name: string }[] }) : sb.from("clients").select("id,business_name").eq("status", "active").order("business_name"),
     sb.from("projects").select("id,title,client_id").order("created_at", { ascending: false }),
   ]);
   const { data: staff } = isClient ? { data: [] as { id: string; full_name: string | null; email: string | null }[] } : await sb.from("profiles").select("id,full_name,email").neq("role", "client");
@@ -37,7 +41,7 @@ export default async function Tickets({ searchParams }: { searchParams: Promise<
     <Shell me={me}>
       <PageHead tag={isClient ? "Support" : "Inbox"} title={isClient ? "Support tickets" : "Tickets"} sub={isClient ? "Need something fixed, changed or built? Tell us here and we'll reply." : `${openCount} open`} />
 
-      <details className="card mb-6 !p-0" open={isClient && list.length === 0}>
+      {(isClient || isLeadRole(me.role)) && <details className="card mb-6 !p-0" open={isClient && list.length === 0}>
         <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-4 font-semibold">{isClient ? "Raise a new ticket" : "Open a ticket for a client"} <span className="btn-lime !px-3 !py-1 text-xs">+ New</span></summary>
         <Form action={createTicketAction} className="grid gap-3 border-t border-edge p-5 sm:grid-cols-2">
           {!isClient && <div className="sm:col-span-2"><label className="label">Client *</label><select name="client_id" required className="input"><option value="">Choose…</option>{(clients ?? []).map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select></div>}
@@ -50,7 +54,7 @@ export default async function Tickets({ searchParams }: { searchParams: Promise<
             : <div><label className="label">Priority</label><select name="priority" defaultValue="normal" className="input"><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>}
           <div className="sm:col-span-2"><button className="btn-primary w-full sm:w-auto">Send ticket</button></div>
         </Form>
-      </details>
+      </details>}
 
       {!isClient && (
         <form method="get" className="mb-3 flex flex-wrap items-center gap-2">
@@ -72,7 +76,7 @@ export default async function Tickets({ searchParams }: { searchParams: Promise<
           <Link key={t.id} href={`/tickets/${t.id}`} className="card flex flex-wrap items-center justify-between gap-x-4 gap-y-2 !p-4 transition hover:border-forest/40">
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold"><span className="mr-2 font-mono text-xs text-mute">{ticketRef(t.ticket_no)}</span>{t.subject}</p>
-              <p className="mt-0.5 font-mono text-[11px] uppercase text-mute">{!isClient && `${t.clients?.business_name} · `}{categoryLabel(t.category)}{t.assigned_to && !isClient ? ` · ${names.get(t.assigned_to) ?? "assigned"}` : ""} · <LocalTime iso={t.updated_at} /></p>
+              <p className="mt-0.5 font-mono text-[11px] uppercase text-mute">{!isClient && `${cn.get(t.client_id) ?? t.clients?.business_name} · `}{categoryLabel(t.category)}{t.assigned_to && !isClient ? ` · ${names.get(t.assigned_to) ?? "assigned"}` : ""} · <LocalTime iso={t.updated_at} /></p>
             </div>
             <div className="flex items-center gap-2">
               {(t.priority === "high" || t.priority === "urgent") && <span className={`pill ${priorityTone[t.priority]}`}>{t.priority}</span>}

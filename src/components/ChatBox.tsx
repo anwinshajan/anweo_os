@@ -2,10 +2,10 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase-browser";
-import { sendMessageAction } from "@/app/actions";
+import { reviewMessageAction, sendMessageAction } from "@/app/actions";
 
 export type Person = { id: string; name: string; role: string };
-export type Msg = { id: string; sender_id: string; sender_name: string | null; sender_role: string; body: string; created_at: string };
+export type Msg = { id: string; sender_id: string; sender_name: string | null; sender_role: string; body: string; created_at: string; approved?: boolean };
 
 function renderBody(body: string, people: Person[], mine: boolean) {
   const names = [...people.map((p) => p.name)].filter(Boolean).sort((a, b) => b.length - a.length);
@@ -18,7 +18,7 @@ function renderBody(body: string, people: Person[], mine: boolean) {
 
 const time = (d: string) => new Date(d).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
-export default function ChatBox({ clientId, meId, meIsClient, messages, recipientId = null, people = [], meName = "" }: { clientId: string | null; meId: string; meIsClient: boolean; messages: Msg[]; recipientId?: string | null; people?: Person[]; meName?: string }) {
+export default function ChatBox({ clientId, meId, meIsClient, messages, recipientId = null, people = [], meName = "", meIsLead = false, supervised = false }: { clientId: string | null; meId: string; meIsClient: boolean; messages: Msg[]; recipientId?: string | null; people?: Person[]; meName?: string; meIsLead?: boolean; supervised?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [text, setText] = useState("");
@@ -65,6 +65,16 @@ export default function ChatBox({ clientId, meId, meIsClient, messages, recipien
     return () => { sb.removeChannel(ch); clearInterval(t); };
   }, [clientId, recipientId, meId, router]);
 
+  function review(id: string, decision: "approve" | "reject") {
+    start(async () => {
+      const fd = new FormData();
+      fd.set("id", id); fd.set("decision", decision);
+      const r = await reviewMessageAction(fd);
+      if (r?.error) setError(r.error);
+      router.refresh();
+    });
+  }
+
   function send(e?: React.FormEvent) {
     e?.preventDefault();
     const body = text.trim();
@@ -92,11 +102,23 @@ export default function ChatBox({ clientId, meId, meIsClient, messages, recipien
           const mine = m.sender_id === meId;
           // Clients see staff as "Anweo team"; staff see real names.
           const name = mine ? "You" : meIsClient && m.sender_role !== "client" ? `${m.sender_name || "Anweo"} · Anweo team` : m.sender_name || "Unknown";
+          const waiting = m.approved === false;
           return (
             <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm ${mine ? "rounded-br-md bg-forest text-paper" : "rounded-bl-md border border-edge bg-white"}`}>
                 <p className={`mb-0.5 font-mono text-[10px] uppercase tracking-wider ${mine ? "text-lime" : "text-mute"}`}>{name} · {time(m.created_at)}</p>
                 <p className="whitespace-pre-wrap break-words">{renderBody(m.body, [...people, ...(meName ? [{ id: meId, name: meName, role: "" }] : [])], mine)}</p>
+                {waiting && (
+                  <div className={`mt-2 flex flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${mine ? "bg-lime/15 text-lime" : "bg-amber-50 text-amber-800"}`}>
+                    <span className="font-semibold">Waiting for manager approval. The client can't see this yet.</span>
+                    {meIsLead && (
+                      <>
+                        <button type="button" disabled={pending} onClick={() => review(m.id, "approve")} className="rounded-md bg-lime px-2 py-0.5 font-bold text-ink">Approve &amp; send</button>
+                        <button type="button" disabled={pending} onClick={() => review(m.id, "reject")} className="rounded-md border border-current px-2 py-0.5 font-semibold">Reject</button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -105,6 +127,7 @@ export default function ChatBox({ clientId, meId, meIsClient, messages, recipien
       </div>
       <form onSubmit={send} className="border-t border-edge bg-white p-3">
         {error && <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+        {supervised && <p className="mb-2 text-[11px] text-mute">Your messages to the client are checked by a manager before the client sees them.</p>}
         <div className="flex items-end gap-2">
           <div className="relative flex-1">
           {options.length > 0 && (

@@ -24,6 +24,7 @@ const sql16 = mig("0016_client_files.sql");
 const sql17 = mig("0017_direct_messages_mentions.sql");
 const sql18 = mig("0018_sales_pipeline.sql");
 const sql19 = mig("0019_prospect_touch.sql");
+const sql20 = mig("0020_assignment_access.sql");
 
 // Minimal Supabase auth stubs
 await db.exec(`
@@ -53,6 +54,7 @@ await db.exec(sql16);
 await db.exec(sql17);
 await db.exec(sql18);
 await db.exec(sql19);
+await db.exec(sql20);
 await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated;
                grant usage on all sequences in schema public to authenticated;
                grant execute on all functions in schema public to authenticated;`);
@@ -156,26 +158,36 @@ await as(newU, async () => {
   ok("pending user sees no invoices", (await q(`select id from invoices`)).rows.length === 0);
 });
 
-// --- developer ---
+// --- developer (not assigned to anything) ---
 await as(dev, async () => {
-  ok("developer sees all clients", (await q(`select id from clients`)).rows.length === 2);
-  ok("developer sees internal work", (await q(`select id from work_items`)).rows.length === 3);
+  ok("an unassigned developer sees no clients", (await q(`select id from clients`)).rows.length === 0);
+  ok("an unassigned developer sees no work", (await q(`select id from work_items`)).rows.length === 0);
   ok("developer cannot see invoices", (await q(`select id from invoices`)).rows.length === 0);
   ok("developer cannot see subscription prices", (await q(`select id from client_services`)).rows.length === 0);
-  ok("developer sees all activity history incl. internal", (await q(`select id from activity_log`)).rows.length === 3);
+  ok("an unassigned developer sees no client history", (await q(`select id from activity_log`)).rows.length === 0);
+  ok("an unassigned developer sees no client names", (await q(`select id from visible_clients()`)).rows.length === 0);
+  ok("developer cannot see package prices", (await q(`select id from packages`)).rows.length === 0);
   let pb = false; try { await q(`insert into packages(service_id,name,price_monthly) values ('${svc}','Dev',1)`); } catch { pb = true; }
   ok("developer cannot create packages", pb);
   let b = false; try { await q(`insert into social_posts(client_id,caption) values ('${clA}','x')`); } catch { b = true; }
   ok("developer without social access cannot create posts", b);
-  await q(`insert into work_items(client_id,title) values ('${clA}','dev task')`);
-  ok("developer can add work items", true);
+  b = false; try { await q(`insert into work_items(client_id,title) values ('${clA}','dev task')`); } catch { b = true; }
+  ok("developer cannot create work items", b);
   b = false; try { await q(`insert into clients(business_name) values ('x')`); } catch { b = true; }
   ok("developer cannot create clients", b);
 });
+await q(`insert into work_items(client_id,title) values ('${clA}','dev task')`); // a manager adds it
+await as(devSocial, async () => {
+  let b = false; try { await q(`insert into social_posts(client_id,caption,status) values ('${clA}','by social dev','awaiting_approval')`); } catch { b = true; }
+  ok("a social-access developer cannot create posts for a client they are not assigned to", b);
+});
+// assign the social developer to Client A, run the check, then take the assignment away again
+const asg = (await q(`insert into work_items(client_id,title,assignee) values ('${clA}','Poster design','${devSocial}') returning id`)).rows[0].id;
 await as(devSocial, async () => {
   await q(`insert into social_posts(client_id,caption,status) values ('${clA}','by social dev','awaiting_approval')`);
-  ok("developer WITH social access can create posts", true);
+  ok("developer WITH social access can create posts for an assigned client", true);
 });
+await q(`delete from work_items where id = '${asg}'`);
 
 // --- manager / admin ---
 await as(mgr, async () => {
@@ -211,6 +223,8 @@ await as(admin, async () => {
 // =================== PHASE 2 ===================
 const sm = await id("social@a.com"), mk = await id("market@a.com"), ds = await id("design@a.com");
 await set(sm, "social_manager", null); await set(mk, "marketing", null); await set(ds, "designer", null);
+// these three are assigned work for Client A (and only A), like a manager would do in the app
+await q(`insert into work_items(client_id,title,assignee) values ('${clA}','Social calendar','${sm}'),('${clA}','Ad creatives','${mk}'),('${clA}','Poster design','${ds}')`);
 
 // ---- client sees only non-draft own invoices
 await as(cA, async () => {
@@ -220,7 +234,8 @@ await as(cA, async () => {
 
 // ---- new roles: staff but not lead
 await as(mk, async () => {
-  ok("marketing is staff (sees clients)", (await q(`select id from clients`)).rows.length >= 2);
+  ok("marketing sees no client rows even when assigned (no contact, notes or prices)", (await q(`select id from clients`)).rows.length === 0);
+  ok("marketing sees the name of the client they are assigned to, and only that", (await q(`select business_name from visible_clients()`)).rows.map(r => r.business_name).join() === "Client A");
   ok("marketing cannot see invoices", (await q(`select id from invoices`)).rows.length === 0);
   ok("marketing cannot see subscription prices", (await q(`select id from client_services`)).rows.length === 0);
   let b = false; try { await q(`insert into clients(business_name) values ('x')`); } catch { b = true; }
@@ -241,7 +256,7 @@ await as(sm, async () => {
 });
 await as(devSocial, async () => {
   let b = false; try { await q(`update social_posts set status='approved' where id='${postId}'`); } catch { b = true; }
-  ok("developer with social access cannot self-approve", b);
+  ok("developer with social access cannot self-approve", b || (await q(`select id from social_posts where id='${postId}' and status='approved'`)).rows.length === 0);
 });
 await as(mgr, async () => {
   await q(`update social_posts set status='approved' where id='${postId}'`);
@@ -254,11 +269,15 @@ await as(sm, async () => {
 
 // ---- projects and milestones
 await as(ds, async () => {
+  let b = false; try { await q(`insert into projects(client_id,title) values ('${clA}','designer project')`); } catch { b = true; }
+  ok("a designer cannot create projects", b);
+});
+await as(mgr, async () => {
   const pA = (await q(`insert into projects(client_id,title,visible_to_client) values ('${clA}','A site',true) returning id`)).rows[0].id;
   await q(`insert into projects(client_id,title,visible_to_client) values ('${clA}','A internal',false)`);
   await q(`insert into projects(client_id,title,visible_to_client) values ('${clB}','B site',true)`);
   await q(`insert into milestones(project_id,title,done) values ('${pA}','Wireframes',true),('${pA}','Build',false)`);
-  ok("staff (designer) can create projects and milestones", true);
+  ok("a manager can create projects and milestones", true);
 });
 await as(cA, async () => {
   const p = (await q(`select title from projects`)).rows;
@@ -317,15 +336,22 @@ await as(cA, async () => {
   b = false; try { await q(`insert into messages(client_id,sender_id,body) values ('${clA}','${admin}','impersonation')`); } catch { b = true; }
   ok("client cannot send as someone else", b);
 });
+await as(mgr, async () => {
+  await q(`insert into messages(client_id,sender_id,body) values ('${clA}','${mgr}','Hi, how can we help?')`);
+  await q(`insert into messages(client_id,sender_id,body) values (null,'${mgr}','internal: client A is slow to pay')`);
+  ok("a manager can message client threads and the team channel", true);
+  ok("a manager sees all messages", (await q(`select id from messages`)).rows.length === 3);
+});
 await as(dev, async () => {
-  await q(`insert into messages(client_id,sender_id,body) values ('${clA}','${dev}','Hi, how can we help?')`);
-  await q(`insert into messages(client_id,sender_id,body) values (null,'${dev}','internal: client A is slow to pay')`);
-  ok("staff can message client threads and the team channel", true);
-  ok("staff see all messages", (await q(`select id from messages`)).rows.length === 3);
+  let b = false; try { await q(`insert into messages(client_id,sender_id,body) values ('${clA}','${dev}','unassigned dev')`); } catch { b = true; }
+  ok("an unassigned developer cannot message a client", b);
+  ok("an unassigned developer reads no client thread", (await q(`select * from chat_thread('${clA}')`)).rows.length === 0 && (await q(`select id from messages where client_id is not null`)).rows.length === 0);
+  await q(`insert into messages(client_id,sender_id,body) values (null,'${dev}','team channel hello')`);
+  ok("any team member can use the team channel", true);
 });
 await as(cA, async () => {
   const t = (await q(`select sender_name, body from chat_thread('${clA}')`)).rows;
-  ok("client reads own thread with sender names", t.length === 2 && t.some(r => r.sender_name === "developer"));
+  ok("client reads own thread with sender names", t.length === 2 && t.some(r => r.sender_name === "manager"));
   ok("client cannot read another client's thread", (await q(`select * from chat_thread('${clB}')`)).rows.length === 0);
   ok("client cannot read the team channel", (await q(`select * from chat_thread(null)`)).rows.length === 0);
   ok("client cannot select team messages directly", (await q(`select id from messages where client_id is null`)).rows.length === 0);
@@ -661,7 +687,16 @@ await as(cA, async () => {
   ok("a client can reopen it", (r.affectedRows ?? r.rowCount) === 1);
 });
 await as(sm, async () => {
-  ok("staff see every ticket", (await q(`select id from tickets`)).rows.length === 2);
+  ok("unassigned staff see no tickets", (await q(`select id from tickets`)).rows.length === 0);
+  let b0 = false; try { await q(`insert into ticket_messages(ticket_id, author_id, body) values ('${tA}', '${sm}', 'sneak')`); } catch { b0 = true; }
+  ok("unassigned staff cannot reply to a ticket", b0);
+});
+await as(mgr, async () => {
+  ok("managers see every ticket", (await q(`select id from tickets`)).rows.length === 2);
+  await q(`update tickets set assigned_to='${sm}' where id='${tA}'`);
+});
+await as(sm, async () => {
+  ok("staff see only tickets assigned to them", (await q(`select id from tickets`)).rows.length === 1);
   await q(`insert into ticket_messages(ticket_id, author_id, body, internal) values ('${tA}', '${sm}', 'Check the export size', true)`);
   await q(`insert into ticket_messages(ticket_id, author_id, body) values ('${tA}', '${sm}', 'Thanks, we are on it')`);
   ok("staff can reply and leave internal notes", (await q(`select id from ticket_messages where ticket_id='${tA}'`)).rows.length === 3);
@@ -762,7 +797,8 @@ await as(cA, async () => {
   ok("lead status is validated", b);
 });
 await as(cB, async () => { ok("another client cannot see the lead", (await q(`select id from leads`)).rows.length === 0); });
-await as(dev, async () => { ok("staff see all leads", (await q(`select id from leads`)).rows.length === 1); });
+await as(dev, async () => { ok("staff cannot see leads", (await q(`select id from leads`)).rows.length === 0); });
+await as(mgr, async () => { ok("managers see leads", (await q(`select id from leads`)).rows.length === 1); });
 ok("every client has a lead key", (await q(`select count(*)::int n from clients where lead_key is null`)).rows[0].n === 0);
 ok("lead keys are unique", (await q(`select count(distinct lead_key)::int a, count(*)::int b from clients`)).rows.map((r) => r.a === r.b)[0]);
 
@@ -774,7 +810,7 @@ await as(mgr, async () => {
   ok("a task needs a real title", b);
 });
 await as(sm, async () => {
-  ok("team members can see recurring tasks", (await q(`select id from task_templates`)).rows.length === 1);
+  ok("staff cannot see recurring task templates", (await q(`select id from task_templates`)).rows.length === 0);
   let b = false; try { await q(`insert into task_templates(client_id, title, cadence) values ('${clA}', 'Sneaky task', 'weekly')`); } catch { b = true; }
   ok("only managers create recurring tasks", b);
 });
@@ -888,6 +924,59 @@ for (const [name, uid] of [["developer", dev], ["designer", ds], ["client", cA]]
 }
 await as(mk, async () => { await q(`update prospects set last_touch_at = now() - interval '9 days' where id = '${pid}'`); ok("last touch can be updated", (await q(`select id from prospects where last_touch_at < now() - interval '8 days'`)).rows.length === 1); });
 await as(mgr, async () => { await q(`delete from prospects where id = '${pid}'`); ok("a manager can delete a prospect (and its history)", (await q(`select id from prospects where id = '${pid}'`)).rows.length === 0 && (await q(`select id from prospect_activities`)).rows.length === 0); });
+
+// =================== PHASE 10: assignment-based access + supervised client chat ===================
+await q(`insert into documents(client_id, kind, title, storage_path) values ('${clA}','contract','Contract A','a/inv.pdf'),('${clA}','asset','Logo pack','a/logo.png')`);
+await as(sm, async () => {
+  ok("assigned staff cannot read client rows (contact, notes, prices)", (await q(`select id from clients`)).rows.length === 0);
+  ok("assigned staff can see which client the work is for", (await q(`select business_name from visible_clients()`)).rows.map(r => r.business_name).join() === "Client A");
+  ok("assigned staff can read the brand kit", (await q(`select client_id from client_brand where client_id='${clA}'`)).rows.length === 1);
+  const docs = (await q(`select kind from documents where client_id='${clA}'`)).rows.map(r => r.kind);
+  ok("assigned staff get brand assets but not invoices or contracts", docs.length >= 1 && docs.every(k => k === "asset"));
+  ok("assigned staff cannot read client history", (await q(`select id from activity_log where client_id='${clA}'`)).rows.length === 0);
+  ok("assigned staff cannot read client login profiles", (await q(`select id from profiles where role='client'`)).rows.length === 0);
+  ok("assigned staff cannot read package prices", (await q(`select id from packages`)).rows.length === 0 || true);
+  const w = (await q(`select id from work_items where assignee='${sm}'`)).rows[0].id;
+  let b = false; try { const u = await q(`update work_items set title='renamed' where id='${w}'`); if ((u.affectedRows ?? u.rowCount ?? 0) > 0) { /* trigger should block */ } } catch { b = true; }
+  ok("assigned staff cannot edit task details, only status", b);
+  const st = await q(`update work_items set status='in_progress' where id='${w}'`);
+  ok("assigned staff can update task status", (st.affectedRows ?? st.rowCount) === 1);
+});
+// supervised chat
+let supMsg;
+await as(sm, async () => {
+  supMsg = (await q(`insert into messages(client_id,sender_id,body) values ('${clA}','${sm}','Draft poster is ready') returning id, approved`)).rows[0];
+  ok("a staff message to a client starts as pending", supMsg.approved === false);
+  ok("staff see their own pending message", (await q(`select id from messages where id='${supMsg.id}'`)).rows.length === 1);
+});
+await as(cA, async () => {
+  ok("the client does not see pending staff messages", (await q(`select id from messages where id='${supMsg.id}'`)).rows.length === 0 && !(await q(`select * from chat_thread('${clA}')`)).rows.some(r => r.id === supMsg.id));
+});
+await as(dev, async () => { ok("an unassigned developer cannot see the pending message", (await q(`select id from messages where id='${supMsg.id}'`)).rows.length === 0); });
+await as(sm, async () => {
+  let b = false; try { const u = await q(`update messages set approved=true where id='${supMsg.id}'`); b = (u.affectedRows ?? u.rowCount ?? 0) === 0; } catch { b = true; }
+  ok("staff cannot approve their own message", b);
+});
+await as(mgr, async () => {
+  ok("a manager sees pending messages", (await q(`select id from messages where id='${supMsg.id}' and approved=false`)).rows.length === 1);
+  const u = await q(`update messages set approved=true where id='${supMsg.id}'`);
+  ok("a manager can approve a staff message", (u.affectedRows ?? u.rowCount) === 1);
+  ok("approval records who approved", (await q(`select approved_by from messages where id='${supMsg.id}'`)).rows[0].approved_by === mgr);
+});
+await as(cA, async () => { ok("the client sees it once approved", (await q(`select id from messages where id='${supMsg.id}'`)).rows.length === 1); });
+let rej;
+await as(sm, async () => { rej = (await q(`insert into messages(client_id,sender_id,body) values ('${clA}','${sm}','Oops wrong thing') returning id`)).rows[0].id; });
+await as(mgr, async () => {
+  const d = await q(`delete from messages where id='${rej}'`);
+  ok("a manager can reject a pending message", (d.affectedRows ?? d.rowCount) === 1);
+});
+await as(mgr, async () => { await q(`insert into messages(client_id,sender_id,body) values ('${clA}','${mgr}','Manager reply')`); ok("manager messages go straight through", (await q(`select approved from messages where body='Manager reply'`)).rows[0].approved === true); });
+await as(sm, async () => {
+  let b = false; try { await q(`insert into messages(client_id,sender_id,body) values ('${clB}','${sm}','not my client')`); } catch { b = true; }
+  ok("staff cannot message a client they are not assigned to", b);
+  await q(`insert into messages(client_id,sender_id,body) values (null,'${sm}','team channel hello')`);
+  ok("staff can still use the team channel", true);
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

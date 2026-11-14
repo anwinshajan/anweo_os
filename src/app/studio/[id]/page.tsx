@@ -9,6 +9,7 @@ import Shell from "@/components/Shell";
 import {
   addPostCommentAction, deletePostAction, deletePostMediaAction, reviewPostAction, savePostAction, setPostStageAction,
 } from "@/app/actions";
+import { nameMap, visibleClients } from "@/lib/clients";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { isLeadRole } from "@/lib/roles";
 import { STAGES, stageOf, stageTone } from "@/lib/studio";
@@ -24,6 +25,7 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
   const sb = await supabaseServer();
   const { data: p } = await sb.from("social_posts").select("*,clients(business_name)").eq("id", id).single();
   if (!p) notFound();
+  const cn = nameMap(await visibleClients(sb));
   const [{ data: media }, { data: comments }, { data: staff }] = await Promise.all([
     sb.from("post_media").select("id,file_name,mime_type,size_bytes,sort_order").eq("post_id", id).order("sort_order"),
     sb.from("post_comments").select("id,author_id,body,created_at").eq("post_id", id).order("created_at"),
@@ -43,7 +45,7 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
       <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">{p.title || "Untitled"}</h1>
-          <p className="mt-1 text-sm text-mute">{p.clients?.business_name} · {p.kind} · {p.platform}{p.created_by ? ` · by ${names.get(p.created_by) ?? "team"}` : ""}</p>
+          <p className="mt-1 text-sm text-mute">{cn.get(p.client_id) ?? p.clients?.business_name} · {p.kind} · {p.platform}{p.created_by ? ` · by ${names.get(p.created_by) ?? "team"}` : ""}</p>
         </div>
         <span className={`pill ${stageTone[st.key]}`}>{st.label}</span>
       </div>

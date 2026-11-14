@@ -5,6 +5,7 @@ import LocalDateTime from "@/components/LocalDateTime";
 import PostThumb from "@/components/PostThumb";
 import Shell, { Empty, PageHead } from "@/components/Shell";
 import { savePostAction } from "@/app/actions";
+import { nameMap, visibleClients } from "@/lib/clients";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { isLeadRole } from "@/lib/roles";
 import { STAGES, stageOf, stageTone as tone } from "@/lib/studio";
@@ -20,9 +21,10 @@ export default async function Studio({ searchParams }: { searchParams: Promise<{
   const lead = isLeadRole(me.role);
   const social = lead || ["social_manager", "marketing", "designer"].includes(me.role) || me.can_manage_social;
 
-  const [{ data: posts }, { data: clients }, { data: staff }] = await Promise.all([
+  const clientList = (await visibleClients(sb)).filter((c) => c.status === "active");
+  const cn = nameMap(await visibleClients(sb));
+  const [{ data: posts }, { data: staff }] = await Promise.all([
     sb.from("social_posts").select("id,client_id,kind,platform,title,caption,status,scheduled_at,created_by,updated_at,clients(business_name),post_media(id,mime_type,sort_order),post_comments(count)").order("updated_at", { ascending: false }).limit(300),
-    sb.from("clients").select("id,business_name").eq("status", "active").order("business_name"),
     sb.from("profiles").select("id,full_name,email").neq("role", "client"),
   ]);
   const names = new Map((staff ?? []).map((p) => [p.id, p.full_name || p.email]));
@@ -44,7 +46,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<{
           <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-4 font-semibold">New idea or post <span className="btn-lime !px-3 !py-1 text-xs">+ Add</span></summary>
           <Form action={savePostAction} className="grid gap-3 border-t border-edge p-5 sm:grid-cols-4">
             <div className="sm:col-span-2"><label className="label">Client *</label>
-              <select name="client_id" required defaultValue={sp.client ?? ""} className="input"><option value="">Choose…</option>{(clients ?? []).map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select></div>
+              <select name="client_id" required defaultValue={sp.client ?? ""} className="input"><option value="">Choose…</option>{clientList.map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select></div>
             <div><label className="label">Type</label><select name="kind" className="input"><option value="post">Post</option><option value="reel">Reel</option><option value="story">Story</option><option value="carousel">Carousel</option></select></div>
             <div><label className="label">Platform</label><select name="platform" className="input"><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="youtube">YouTube</option><option value="linkedin">LinkedIn</option><option value="whatsapp">WhatsApp</option></select></div>
             <div className="sm:col-span-4"><label className="label">Title or idea *</label><input name="title" required placeholder="e.g. Before/after bridal makeover reel" className="input" /></div>
@@ -60,7 +62,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<{
 
       <form method="get" className="mb-3 flex flex-wrap items-center gap-2">
         {stage !== "all" && <input type="hidden" name="stage" value={stage} />}
-        <select name="client" defaultValue={sp.client ?? ""} className="input !w-auto min-w-[12rem]" aria-label="Filter by client"><option value="">All clients</option>{(clients ?? []).map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select>
+        <select name="client" defaultValue={sp.client ?? ""} className="input !w-auto min-w-[12rem]" aria-label="Filter by client"><option value="">All clients</option>{clientList.map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select>
         <button className="btn-ghost !py-2">Filter</button>
         {sp.client && <Link href={href(stage!)} className="text-sm text-forest hover:underline">Clear</Link>}
       </form>
@@ -83,7 +85,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<{
               <Link key={p.id} href={`/studio/${p.id}`} className="card flex flex-col overflow-hidden !p-0 transition hover:-translate-y-0.5 hover:border-forest/40">
                 <PostThumb media={[...(p.post_media ?? [])].sort((a: any, b: any) => a.sort_order - b.sort_order)} kind={p.kind} className="aspect-[16/10] w-full" />
                 <div className="flex flex-1 flex-col p-4">
-                  <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-semibold">{p.clients?.business_name}</span><span className={`pill shrink-0 ${tone[st.key]}`}>{st.label}</span></div>
+                  <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-semibold">{cn.get(p.client_id) ?? p.clients?.business_name}</span><span className={`pill shrink-0 ${tone[st.key]}`}>{st.label}</span></div>
                   <p className="mt-1.5 line-clamp-2 text-sm text-ink/80">{p.title || p.caption || "Untitled"}</p>
                   <p className="mt-auto pt-3 font-mono text-[10.5px] uppercase text-mute">{p.kind} · {p.platform} · {names.get(p.created_by) ?? "—"}{cc ? ` · ${cc} comment${cc === 1 ? "" : "s"}` : ""}</p>
                 </div>

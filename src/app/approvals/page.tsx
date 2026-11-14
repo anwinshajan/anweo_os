@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Form from "@/components/Form";
 import Shell, { Empty, PageHead, label, statusPill } from "@/components/Shell";
 import { approveFileAction, returnFileAction, reviewPostAction } from "@/app/actions";
+import { nameMap, visibleClients } from "@/lib/clients";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
@@ -13,11 +14,12 @@ export default async function Approvals() {
   const lead = me.role === "admin" || me.role === "manager";
   const social = lead || me.role === "social_manager" || me.can_manage_social;
   const sb = await supabaseServer();
+  const cn = nameMap(await visibleClients(sb));
 
   const { data: pendingFiles } = lead ? await sb.from("client_files").select("id,client_id,kind,title,url,provider,clients(business_name)").eq("status", "pending").order("created_at") : { data: [] as any[] };
   const [{ data: waiting }, { data: ready }] = await Promise.all([
-    sb.from("social_posts").select("id,kind,platform,caption,scheduled_at,clients(business_name)").eq("status", "awaiting_approval").order("scheduled_at", { nullsFirst: false }),
-    sb.from("social_posts").select("id,kind,platform,caption,scheduled_at,status,clients(business_name)").in("status", ["approved", "scheduled"]).order("scheduled_at", { nullsFirst: false }),
+    sb.from("social_posts").select("id,client_id,kind,platform,caption,scheduled_at,clients(business_name)").eq("status", "awaiting_approval").order("scheduled_at", { nullsFirst: false }),
+    sb.from("social_posts").select("id,client_id,kind,platform,caption,scheduled_at,status,clients(business_name)").in("status", ["approved", "scheduled"]).order("scheduled_at", { nullsFirst: false }),
   ]);
   const when = (d: string | null) => (d ? new Date(d).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "No time set");
 
@@ -50,7 +52,7 @@ export default async function Approvals() {
           {(waiting ?? []).map((p: any) => (
             <div key={p.id} className="card !p-4">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold">{p.clients?.business_name}</span>
+                <span className="font-semibold">{cn.get(p.client_id) ?? p.clients?.business_name}</span>
                 <span className="pill bg-forest-soft text-forest">{p.kind} · {p.platform}</span>
               </div>
               {p.caption && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-paper px-3.5 py-3 text-sm text-ink/85">{p.caption}</p>}
@@ -75,7 +77,7 @@ export default async function Approvals() {
           {(ready ?? []).map((p: any) => (
             <div key={p.id} className="card !p-4">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold">{p.clients?.business_name}</span>
+                <span className="font-semibold">{cn.get(p.client_id) ?? p.clients?.business_name}</span>
                 <span className={`pill ${statusPill(p.status)}`}>{label(p.status)}</span>
               </div>
               {p.caption && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-paper px-3.5 py-3 text-sm text-ink/85">{p.caption}</p>}

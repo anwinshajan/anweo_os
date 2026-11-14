@@ -11,7 +11,7 @@ import { supabaseServer } from "@/lib/supabase-server";
 const PLATFORMS: [string, string][] = [["instagram", "Instagram"], ["facebook", "Facebook"], ["youtube", "YouTube"], ["linkedin", "LinkedIn"], ["tiktok", "TikTok"], ["whatsapp", "WhatsApp"], ["google_business", "Google Business"], ["other", "Other"]];
 const n = (v: number | null) => (v === null || v === undefined ? "–" : Number(v).toLocaleString("en-GB"));
 
-export default async function MarketingTab({ id, canEdit, currency, origin }: { id: string; canEdit: boolean; currency: string; origin: string }) {
+export default async function MarketingTab({ id, canEdit, currency, origin, showMoney = false }: { id: string; canEdit: boolean; currency: string; origin: string; showMoney?: boolean }) {
   const sb = await supabaseServer();
   const [{ data: brand }, { data: accounts }, { data: metrics }, { data: client }] = await Promise.all([
     sb.from("client_brand").select("*").eq("client_id", id).maybeSingle(),
@@ -79,7 +79,7 @@ export default async function MarketingTab({ id, canEdit, currency, origin }: { 
             <div><label className="label">Reach</label><input name="reach" type="number" min="0" className="input" /></div>
             <div><label className="label">Impressions</label><input name="impressions" type="number" min="0" className="input" /></div>
             <div><label className="label">Engagement</label><input name="engagement" type="number" min="0" className="input" /></div>
-            <div className="sm:col-span-2"><label className="label">Ad spend</label><div className="flex gap-2"><CurrencySelect name="ad_currency" short defaultValue={currency} className="input !w-24 shrink-0" /><input name="ad_spend" type="number" min="0" step="0.01" className="input min-w-0 flex-1" /></div></div>
+            {showMoney && <div className="sm:col-span-2"><label className="label">Ad spend</label><div className="flex gap-2"><CurrencySelect name="ad_currency" short defaultValue={currency} className="input !w-24 shrink-0" /><input name="ad_spend" type="number" min="0" step="0.01" className="input min-w-0 flex-1" /></div></div>}
             <div className="sm:col-span-3"><label className="label">Highlights for the report</label><input name="notes" placeholder="Bridal reel reached 12k people" className="input" /></div>
             <div className="flex items-end"><button className="btn-primary w-full">Save month</button></div>
             <p className="text-xs text-mute sm:col-span-6">Saving a month that already exists updates it.</p>
@@ -87,7 +87,7 @@ export default async function MarketingTab({ id, canEdit, currency, origin }: { 
         )}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
-            <thead><tr className="font-mono text-[10px] uppercase tracking-wider text-mute"><th className="py-2 pr-3">Month</th><th className="pr-3">Platform</th><th className="pr-3 text-right">Followers</th><th className="pr-3 text-right">Reach</th><th className="pr-3 text-right">Impr.</th><th className="pr-3 text-right">Engage.</th><th className="pr-3 text-right">Ad spend</th><th /></tr></thead>
+            <thead><tr className="font-mono text-[10px] uppercase tracking-wider text-mute"><th className="py-2 pr-3">Month</th><th className="pr-3">Platform</th><th className="pr-3 text-right">Followers</th><th className="pr-3 text-right">Reach</th><th className="pr-3 text-right">Impr.</th><th className="pr-3 text-right">Engage.</th>{showMoney && <th className="pr-3 text-right">Ad spend</th>}<th /></tr></thead>
             <tbody>
               {(metrics ?? []).length === 0 && <tr><td colSpan={8} className="py-4 text-mute">No results recorded yet.</td></tr>}
               {(metrics ?? []).map((r) => (
@@ -95,7 +95,7 @@ export default async function MarketingTab({ id, canEdit, currency, origin }: { 
                   <td className="py-2 pr-3 font-medium">{new Date(`${r.period}T00:00:00Z`).toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" })}</td>
                   <td className="pr-3 capitalize text-mute">{r.platform}</td>
                   <td className="pr-3 text-right">{n(r.followers)}</td><td className="pr-3 text-right">{n(r.reach)}</td><td className="pr-3 text-right">{n(r.impressions)}</td><td className="pr-3 text-right">{n(r.engagement)}</td>
-                  <td className="pr-3 text-right">{r.ad_spend !== null ? money(r.ad_spend, r.ad_currency ?? currency) : "–"}</td>
+                  {showMoney && <td className="pr-3 text-right">{r.ad_spend !== null ? money(r.ad_spend, r.ad_currency ?? currency) : "–"}</td>}
                   <td className="text-right">{canEdit && <Form action={deleteMetricsAction} quiet><input type="hidden" name="id" value={r.id} /><input type="hidden" name="client_id" value={id} /><DeleteButton label="×" message="Delete this month's numbers?" /></Form>}</td>
                 </tr>
               ))}
@@ -113,12 +113,12 @@ export default async function MarketingTab({ id, canEdit, currency, origin }: { 
         </form>
       </section>
 
-      <section className="card">
+      {client?.lead_key && <section className="card">
         <p className="tag mb-1">[ Lead form for the client's website ]</p>
         <p className="mb-3 text-sm text-mute">Paste this on any page. Enquiries land in the Leads tab and the client is notified. Fields: name, phone, email, message.</p>
         <pre className="overflow-x-auto rounded-xl bg-ink p-4 text-[11px] leading-relaxed text-paper">{snippet}</pre>
         <div className="mt-3 flex flex-wrap gap-2"><CopyButton text={snippet} label="Copy the form" /><CopyButton text={endpoint} label="Copy just the link" /></div>
-      </section>
+      </section>}
     </div>
   );
 }

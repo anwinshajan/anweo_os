@@ -11,6 +11,7 @@ import { Corner, Logo } from "@/components/Logo";
 import { signDocumentAction } from "./actions";
 import { getMe, supabaseServer, type Me } from "@/lib/supabase-server";
 import { isAdminRole, isLeadRole } from "@/lib/roles";
+import { visibleClients } from "@/lib/clients";
 import { effectiveDueDate, intervalLabel, isOverdue, isoDay } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
 
 /* ---------------- Staff ---------------- */
 async function StaffHome({ me, q, archived }: { me: Me; q: string; archived: boolean }) {
+  if (!isLeadRole(me.role)) return <TeamHome me={me} />;
   const sb = await supabaseServer();
   const lead = isLeadRole(me.role);
   const admin = isAdminRole(me.role);
@@ -101,6 +103,38 @@ async function StaffHome({ me, q, archived }: { me: Me; q: string; archived: boo
             <div className="hidden flex-wrap justify-end gap-1.5 sm:flex">
               {(byClient.get(c.id) ?? []).slice(0, 3).map((n) => <span key={n} className="pill bg-forest-soft text-forest">{n}</span>)}
               {lead && (byClient.get(c.id) ?? []).length === 0 && <span className="pill bg-amber-100 text-amber-800">No services</span>}
+            </div>
+          </Link>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+/* ---------------- Team member: only the clients they were given work on ---------------- */
+async function TeamHome({ me }: { me: Me }) {
+  const sb = await supabaseServer();
+  const [clients, { data: work }] = await Promise.all([
+    visibleClients(sb),
+    sb.from("work_items").select("id,client_id,title,status,due_date").eq("assignee", me.id).neq("status", "done").order("due_date", { nullsFirst: false }),
+  ]);
+  const open = new Map<string, number>();
+  (work ?? []).forEach((w: any) => open.set(w.client_id, (open.get(w.client_id) ?? 0) + 1));
+  return (
+    <div className="space-y-6">
+      <PageHead tag="Workspace" title="My work" sub="You can see a client only while a manager has given you work on them. Open one to find the brand kit, assets and your tasks." />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat tag="My open tasks" value={String((work ?? []).length)} href="/tasks" />
+        <Stat tag="Clients I'm working on" value={String(clients.length)} />
+      </div>
+      <section className="space-y-2.5">
+        {clients.length === 0 && <Empty>Nothing assigned yet. When a manager gives you a task, the client's brand kit and files show up here.</Empty>}
+        {clients.map((c) => (
+          <Link key={c.id} href={`/clients/${c.id}`} className="card flex items-center gap-4 !p-4 transition hover:-translate-y-0.5 hover:border-forest/40">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-forest text-base font-bold text-lime">{c.business_name[0]?.toUpperCase()}</span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-semibold">{c.business_name}</p>
+              <p className="truncate text-xs text-mute">{open.get(c.id) ? `${open.get(c.id)} open task${open.get(c.id) === 1 ? "" : "s"} for you` : "No open tasks"}</p>
             </div>
           </Link>
         ))}

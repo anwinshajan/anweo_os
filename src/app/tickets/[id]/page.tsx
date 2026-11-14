@@ -5,6 +5,7 @@ import Form from "@/components/Form";
 import LocalTime from "@/components/LocalTime";
 import Shell from "@/components/Shell";
 import { clientTicketStatusAction, deleteTicketAction, replyTicketAction, updateTicketAction } from "@/app/actions";
+import { nameMap, visibleClients } from "@/lib/clients";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { isAdminRole } from "@/lib/roles";
 import { categoryLabel, isOpenStatus, priorityTone, statusLabel, statusTone, ticketRef, STATUSES } from "@/lib/tickets";
@@ -18,8 +19,9 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const sb = await supabaseServer();
-  const { data: t } = await sb.from("tickets").select("id,ticket_no,subject,category,priority,status,assigned_to,created_by,created_at,resolved_at,project_id,clients(business_name),projects(title)").eq("id", id).single();
+  const { data: t } = await sb.from("tickets").select("id,client_id,ticket_no,subject,category,priority,status,assigned_to,created_by,created_at,resolved_at,project_id,clients(business_name),projects(title)").eq("id", id).single();
   if (!t) notFound();
+  const cn = nameMap(me.role === "client" ? [] : await visibleClients(sb));
   const isClient = me.role === "client";
   const [{ data: msgs }, { data: people }] = await Promise.all([
     sb.from("ticket_messages").select("id,author_id,body,internal,created_at").eq("ticket_id", id).order("created_at"),
@@ -37,7 +39,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
         <div className="min-w-0">
           <p className="font-mono text-xs text-mute">{ticketRef(t.ticket_no)}</p>
           <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">{t.subject}</h1>
-          <p className="mt-1 text-sm text-mute">{!isClient && `${(t.clients as any)?.business_name} · `}{categoryLabel(t.category)}{(t.projects as any)?.title ? ` · ${(t.projects as any).title}` : ""} · opened <LocalTime iso={t.created_at} /></p>
+          <p className="mt-1 text-sm text-mute">{!isClient && `${cn.get(t.client_id) ?? (t.clients as any)?.business_name} · `}{categoryLabel(t.category)}{(t.projects as any)?.title ? ` · ${(t.projects as any).title}` : ""} · opened <LocalTime iso={t.created_at} /></p>
         </div>
         <div className="flex items-center gap-2">
           {(t.priority === "high" || t.priority === "urgent") && <span className={`pill ${priorityTone[t.priority]}`}>{t.priority}</span>}

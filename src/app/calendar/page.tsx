@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import MonthCalendar, { type CalPost } from "@/components/MonthCalendar";
 import Shell, { PageHead } from "@/components/Shell";
+import { nameMap, visibleClients } from "@/lib/clients";
 import { getMe, supabaseServer } from "@/lib/supabase-server";
 import { isLeadRole } from "@/lib/roles";
 
@@ -23,8 +24,11 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   let dated = sb.from("social_posts").select("id,title,caption,status,kind,platform,scheduled_at,client_id,clients(business_name)").gte("scheduled_at", from).lt("scheduled_at", to).neq("status", "rejected");
   let loose = sb.from("social_posts").select("id,title,caption,status,kind,platform,scheduled_at,client_id,clients(business_name)").is("scheduled_at", null).in("status", ["in_progress", "awaiting_approval", "approved"]).limit(30);
   if (sp.client) { dated = dated.eq("client_id", sp.client); loose = loose.eq("client_id", sp.client); }
-  const [{ data: a }, { data: b }, { data: clients }] = await Promise.all([dated, loose, sb.from("clients").select("id,business_name").eq("status", "active").order("business_name")]);
-  const posts: CalPost[] = [...(a ?? []), ...(b ?? [])].map((p: any) => ({ id: p.id, title: p.title || (p.caption ?? "").slice(0, 50), status: p.status, kind: p.kind, platform: p.platform, at: p.scheduled_at, client: p.clients?.business_name }));
+  const allClients = await visibleClients(sb);
+  const cn = nameMap(allClients);
+  const clients = allClients.filter((c) => c.status === "active");
+  const [{ data: a }, { data: b }] = await Promise.all([dated, loose]);
+  const posts: CalPost[] = [...(a ?? []), ...(b ?? [])].map((p: any) => ({ id: p.id, title: p.title || (p.caption ?? "").slice(0, 50), status: p.status, kind: p.kind, platform: p.platform, at: p.scheduled_at, client: cn.get(p.client_id) ?? p.clients?.business_name }));
   const base = `/calendar${sp.client ? `?client=${sp.client}` : ""}`;
 
   return (

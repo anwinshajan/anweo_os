@@ -50,11 +50,27 @@ export default async function ClientDetail({ params, searchParams }: { params: P
   const rawTab = sp.tab;
   const h = await headers();
   const origin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("host") ?? "localhost"}`;
-  const visibleTabs = TABS.filter((t) => !t.adminOnly || admin);
-  const tab = visibleTabs.some((t) => t.key === rawTab) ? (rawTab as string) : "overview";
+  // Managers and admin see everything. Team members only get a work brief: the client's name, brand kit, files, content and their own tasks.
+  const TEAM_TABS = [
+    { key: "work", label: "My work" },
+    { key: "marketing", label: "Brand & accounts" },
+    { key: "documents", label: "Brand assets" },
+    { key: "files", label: "Files" },
+    { key: "calendar", label: "Calendar" },
+  ];
+  const visibleTabs = lead ? TABS.filter((t) => !t.adminOnly || admin) : TEAM_TABS;
+  const tab = visibleTabs.some((t) => t.key === rawTab) ? (rawTab as string) : visibleTabs[0].key;
 
-  const { data: client } = await sb.from("clients").select("*").eq("id", id).single();
-  if (!client) notFound();
+  const client: any = lead
+    ? (await sb.from("clients").select("*").eq("id", id).single()).data
+    : (() => null)();
+  let teamClient: { id: string; business_name: string; status: string } | null = null;
+  if (!lead) {
+    const { data: vc } = await sb.rpc("visible_clients");
+    teamClient = ((vc ?? []) as { id: string; business_name: string; status: string }[]).find((c) => c.id === id) ?? null;
+    if (!teamClient) notFound();
+  } else if (!client) notFound();
+  const view: any = lead ? client : { ...teamClient, currency: "GBP", contact_name: null, email: null, phone: null, country: null };
 
   const { data: activeSubsAll } = lead
     ? await sb.from("client_services").select("price_monthly,currency").eq("client_id", id).eq("status", "active")
@@ -65,16 +81,17 @@ export default async function ClientDetail({ params, searchParams }: { params: P
     <Shell me={me}>
       <div className="space-y-5">
         <div>
-          <Link href="/" className="tag hover:text-forest">← All clients</Link>
+          <Link href="/" className="tag hover:text-forest">{lead ? "← All clients" : "← My work"}</Link>
           <div className="mt-3 flex items-start gap-3 sm:gap-4">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-forest text-xl font-bold text-lime sm:h-14 sm:w-14 sm:text-2xl">{client.business_name[0]?.toUpperCase()}</span>
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-forest text-xl font-bold text-lime sm:h-14 sm:w-14 sm:text-2xl">{view.business_name[0]?.toUpperCase()}</span>
             <div className="min-w-0 flex-1">
-              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-4xl">{client.business_name}{client.status === "archived" && <span className="pill ml-3 align-middle bg-charcoal/10 text-charcoal">archived</span>}</h1>
+              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-4xl">{view.business_name}{view.status === "archived" && <span className="pill ml-3 align-middle bg-charcoal/10 text-charcoal">archived</span>}</h1>
               <div className="mt-1 space-y-0.5 text-sm text-mute">
-                {client.contact_name && <p>{client.contact_name}{client.country ? ` · ${client.country}` : ""}</p>}
-                {client.email && <p className="break-all">{client.email}</p>}
-                {client.phone && <p>{client.phone}</p>}
-                <p className="font-mono text-[11px] text-forest">bills in {client.currency}</p>
+                {lead && client.contact_name && <p>{client.contact_name}{client.country ? ` · ${client.country}` : ""}</p>}
+                {lead && client.email && <p className="break-all">{client.email}</p>}
+                {lead && client.phone && <p>{client.phone}</p>}
+                {lead && <p className="font-mono text-[11px] text-forest">bills in {client.currency}</p>}
+                {!lead && <p className="text-xs">You can see this client because a manager gave you work on it.</p>}
               </div>
             </div>
           </div>
@@ -90,16 +107,16 @@ export default async function ClientDetail({ params, searchParams }: { params: P
           ))}
         </nav>
 
-        {tab === "overview" && <Overview id={id} client={client} lead={lead} admin={admin} />}
-        {tab === "projects" && <ProjectsTab id={id} admin={admin} client={client} />}
+        {lead && tab === "overview" && <Overview id={id} client={client} lead={lead} admin={admin} />}
+        {lead && tab === "projects" && <ProjectsTab id={id} admin={admin} client={client} />}
         {tab === "documents" && <Documents id={id} lead={lead} />}
-        {tab === "work" && <WorkAndContent id={id} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
+        {tab === "work" && <WorkAndContent id={id} lead={lead} meCanSocial={lead || me.role === "social_manager" || me.can_manage_social} />}
         {tab === "work" && lead && <TemplatesSection id={id} />}
         {tab === "billing" && admin && <BillingTab id={id} client={client} />}
         {tab === "calendar" && <CalendarTab id={id} month={/^\d{4}-(0[1-9]|1[0-2])$/.test(sp.m ?? "") ? sp.m! : new Date().toISOString().slice(0, 7)} canEdit={lead || me.role === "social_manager" || me.role === "marketing" || me.role === "designer" || me.can_manage_social} />}
-        {tab === "marketing" && <MarketingTab id={id} currency={client.currency} canEdit={lead || me.role === "social_manager" || me.role === "marketing" || me.role === "designer" || me.can_manage_social} origin={origin} />}
+        {tab === "marketing" && <MarketingTab id={id} showMoney={lead} currency={view.currency} canEdit={lead || me.role === "social_manager" || me.role === "marketing" || me.role === "designer" || me.can_manage_social} origin={origin} />}
         {tab === "files" && <FilesTab id={id} folder={sp.f ?? null} lead={lead} origin={origin} />}
-        {tab === "leads" && <LeadsTab id={id} currency={client.currency} />}
+        {lead && tab === "leads" && <LeadsTab id={id} currency={client.currency} />}
         {tab === "history" && admin && <HistoryTab id={id} />}
       </div>
     </Shell>
@@ -207,7 +224,7 @@ async function Documents({ id, lead }: { id: string; lead: boolean }) {
 }
 
 /* ----------------------------------------------------------------- Work & content */
-async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: boolean }) {
+async function WorkAndContent({ id, meCanSocial, lead }: { id: string; meCanSocial: boolean; lead: boolean }) {
   const sb = await supabaseServer();
   const [{ data: work }, { data: posts }, { data: staff }] = await Promise.all([
     sb.from("work_items").select("id,title,status,due_date,visible_to_client,assignee").eq("client_id", id).order("created_at", { ascending: false }),
@@ -220,21 +237,21 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
       <section className="card">
         <p className="tag mb-3">[ Work ]</p>
         <div className="space-y-2">
-          {(work ?? []).length === 0 && <Empty>No work items yet.</Empty>}
+          {(work ?? []).length === 0 && <Empty>{lead ? "No work items yet." : "Nothing is assigned to you here right now."}</Empty>}
           {(work ?? []).map((w: any) => (
             <Form key={w.id} action={setWorkStatusAction} className="row flex-wrap">
               <input type="hidden" name="id" value={w.id} /><input type="hidden" name="client_id" value={id} />
               <div className="min-w-0"><p className="truncate">{w.title}{!w.visible_to_client && <span className="ml-2 font-mono text-[10px] uppercase text-mute">internal</span>}</p>
                 <p className="font-mono text-[11px] text-mute">{w.assignee ? `→ ${who.get(w.assignee) ?? "someone"}` : "Unassigned"}{w.due_date ? ` · due ${fmtDate(w.due_date)}` : ""}</p></div>
               <span className="flex shrink-0 items-center gap-2">
-                <select key={w.assignee ?? "none"} name="assignee" defaultValue={w.assignee ?? ""} className="input !w-auto max-w-[9rem] !py-1.5 !text-xs" aria-label="Assigned to"><option value="">Unassigned</option>{(staff ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}</select>
+                {lead && <select key={w.assignee ?? "none"} name="assignee" defaultValue={w.assignee ?? ""} className="input !w-auto max-w-[9rem] !py-1.5 !text-xs" aria-label="Assigned to"><option value="">Unassigned</option>{(staff ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}</select>}
                 <select key={w.status} name="status" defaultValue={w.status} className="input !w-auto !py-1.5 !text-xs">{["todo", "in_progress", "review", "done"].map((s) => <option key={s} value={s}>{label(s)}</option>)}</select>
                 <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
               </span>
             </Form>
           ))}
         </div>
-        <Form action={addWorkAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
+        {lead && <Form action={addWorkAction} className="mt-5 grid gap-3 border-t border-edge pt-5 sm:grid-cols-4">
           <input type="hidden" name="client_id" value={id} />
           <div className="sm:col-span-2"><label className="label">New task</label><input name="title" required className="input" /></div>
           <div><label className="label">Assign to</label>
@@ -242,7 +259,7 @@ async function WorkAndContent({ id, meCanSocial }: { id: string; meCanSocial: bo
           <div><label className="label">Due</label><input name="due_date" type="date" className="input" /></div>
           <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" name="visible" defaultChecked className="h-4 w-4 accent-forest" /> Show to client</label>
           <div><button className="btn-primary w-full">Add task</button></div>
-        </Form>
+        </Form>}
       </section>
 
       <section className="card">

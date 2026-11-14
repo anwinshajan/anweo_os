@@ -34,7 +34,7 @@ export default async function ChatIndex() {
 
   const sb = await supabaseServer();
   const [{ data: clients }, { data: last }, { data: team }, { data: dms }] = await Promise.all([
-    sb.from("clients").select("id,business_name").eq("status", "active").order("business_name"),
+    sb.rpc("visible_clients"),
     sb.from("messages").select("client_id,body,created_at").not("client_id", "is", null).order("created_at", { ascending: false }).limit(200),
     sb.from("profiles").select("id,full_name,email,role").eq("status", "active").neq("role", "client").neq("id", me.id).order("full_name"),
     sb.from("messages").select("sender_id,recipient_id,body,created_at").not("recipient_id", "is", null).order("created_at", { ascending: false }).limit(200),
@@ -44,7 +44,7 @@ export default async function ChatIndex() {
   const people = [...(team ?? [])].sort((a: any, b: any) => (lastDm.get(b.id)?.created_at ?? "").localeCompare(lastDm.get(a.id)?.created_at ?? ""));
   const latest = new Map<string, { body: string; created_at: string }>();
   (last ?? []).forEach((m: any) => { if (!latest.has(m.client_id)) latest.set(m.client_id, m); });
-  const sorted = [...(clients ?? [])].sort((a, b) => (latest.get(b.id)?.created_at ?? "").localeCompare(latest.get(a.id)?.created_at ?? ""));
+  const sorted = [...((clients ?? []) as { id: string; business_name: string; status?: string }[]).filter((c) => c.status !== "archived")].sort((a, b) => (latest.get(b.id)?.created_at ?? "").localeCompare(latest.get(a.id)?.created_at ?? ""));
 
   return (
     <Shell me={me}>
